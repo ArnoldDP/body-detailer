@@ -1,0 +1,66 @@
+Face|Lips|femalehead
+Face|Nose|femalehead
+Face|Nose tip|femalehead
+Face|Cheeks|femalehead
+Face|Under eyes|femalehead
+Face|Eyelids|femalehead
+Face|Brows|femalehead
+Face|Forehead|femalehead
+Face|Chin|femalehead
+Face|Jaw|femalehead
+Face|Under chin|femalehead
+Face|Ears|femalehead
+Face|Nape|femalehead
+Face|Scalp|femalehead
+Face|Neck (head)|femalehead
+Torso|Neck|femalebody_1
+Torso|Collarbone|femalebody_1
+Torso|Upper chest|femalebody_1
+Torso|Sternum|femalebody_1
+Torso|Breasts|femalebody_1
+Torso|Areolae|femalebody_1
+Torso|Nipples|femalebody_1
+Torso|Underbust|femalebody_1
+Torso|Belly|femalebody_1
+Torso|Navel|femalebody_1
+Torso|Sides|femalebody_1
+Torso|Hips|femalebody_1
+Torso|Pubic region|femalebody_1
+Torso|Upper back|femalebody_1
+Torso|Shoulder blades|femalebody_1
+Torso|Lower back|femalebody_1
+Torso|Spine|femalebody_1
+Torso|Buttocks|femalebody_1
+Genitals|Vulva|femalebody_1,femalebody_etc_v2_1
+Genitals|Labia (inner)|femalebody_etc_v2_1
+Genitals|Anus|femalebody_1,malebody_1
+Genitals|Perineum|femalebody_1
+Joints|Shoulders|femalebody_1
+Joints|Elbows|femalebody_1
+Joints|Inner elbows|femalebody_1
+Joints|Wrists|femalebody_1,femalehands_1
+Joints|Hip creases|femalebody_1
+Joints|Knees|femalebody_1
+Joints|Back of knees|femalebody_1
+Joints|Ankles|femalebody_1
+Joints|Knuckles|femalehands_1
+Arms|Armpits|femalebody_1
+Arms|Biceps|femalebody_1
+Arms|Triceps|femalebody_1
+Arms|Inner upper arm|femalebody_1
+Arms|Forearms (outer)|femalebody_1
+Arms|Forearms (inner)|femalebody_1
+Hands|Palms|femalehands_1
+Hands|Back of hands|femalehands_1
+Hands|Fingers|femalehands_1
+Hands|Fingertips|femalehands_1
+Legs|Thighs (front)|femalebody_1
+Legs|Thighs (outer)|femalebody_1
+Legs|Thighs (inner)|femalebody_1
+Legs|Thighs (back)|femalebody_1
+Legs|Shins|femalebody_1
+Legs|Calves|femalebody_1
+Feet|Soles|femalebody_1
+Feet|Heels|femalebody_1
+Feet|Toes|femalebody_1
+Feet|Top of feet|femalebody_1

@@ -1,0 +1,66 @@
+Lips: #FF2828
+Nose: #2866FF
+Nose tip: #A5FF28
+Cheeks: #FF28E4
+Under eyes: #28FFDB
+Eyelids: #FF9C28
+Brows: #5D28FF
+Forehead: #31FF28
+Chin: #FF286F
+Jaw: #28AEFF
+Under chin: #EDFF28
+Ears: #D128FF
+Nape: #28FF93
+Scalp: #FF5428
+Neck (head): #283AFF
+Neck: #79FF28
+Collarbone: #FF28B7
+Upper chest: #28F6FF
+Sternum: #FFC828
+Breasts: #8A28FF
+Areolae: #28FF4B
+Nipples: #FF2843
+Underbust: #2882FF
+Belly: #C0FF28
+Navel: #FE28FF
+Sides: #28FFBF
+Hips: #FF8028
+Pubic region: #4228FF
+Upper back: #4CFF28
+Shoulder blades: #FF288B
+Lower back: #28CAFF
+Spine: #FFF528
+Buttocks: #B628FF
+Vulva: #28FF77
+Labia (inner): #FF3828
+Anus: #2855FF
+Perineum: #94FF28
+Shoulders: #FF28D3
+Elbows: #28FFEC
+Inner elbows: #FFAD28
+Wrists: #6E28FF
+Hip creases: #28FF2F
+Knees: #FF285E
+Back of knees: #289DFF
+Ankles: #DCFF28
+Knuckles: #E228FF
+Armpits: #28FFA4
+Biceps: #FF6528
+Triceps: #2829FF
+Inner upper arm: #68FF28
+Forearms (outer): #FF28A6
+Forearms (inner): #28E5FF
+Palms: #FFD928
+Back of hands: #9A28FF
+Fingers: #28FF5C
+Fingertips: #FF2832
+Thighs (front): #2871FF
+Thighs (outer): #AFFF28
+Thighs (inner): #FF28EE
+Thighs (back): #28FFD0
+Shins: #FF9128
+Calves: #5328FF
+Soles: #3BFF28
+Heels: #FF287A
+Toes: #28B9FF
+Top of feet: #F7FF28
