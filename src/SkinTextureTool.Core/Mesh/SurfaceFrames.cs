@@ -17,25 +17,30 @@ public sealed class SurfaceFrames
     /// <param name="shapes">Shapes baked together; vertices are welded across all of them.</param>
     /// <param name="smoothDegree">Faces further than this from a vertex's own normal don't smooth into it (MuDynamicNormalMap default 60).</param>
     /// <param name="weldTolerance">Positions closer than this count as the same point.</param>
-    public static List<SurfaceFrames> Build(IReadOnlyList<ShapeData> shapes, float smoothDegree = 60f, bool allowInvertSmooth = false, float weldTolerance = 1e-4f)
+    /// <param name="positions">Optional per-shape positions to use instead of the shapes' own (a morphed copy, for slider-driven normals).</param>
+    public static List<SurfaceFrames> Build(IReadOnlyList<ShapeData> shapes, float smoothDegree = 60f, bool allowInvertSmooth = false,
+        float weldTolerance = 1e-4f, IReadOnlyList<float[]>? positions = null)
     {
         // Flatten every shape into one vertex/face list so seams between shapes are welded too.
         var offsets = new int[shapes.Count + 1];
         for (var s = 0; s < shapes.Count; s++) offsets[s + 1] = offsets[s] + shapes[s].VertexCount;
         var vertCount = offsets[^1];
         var pos = new float[vertCount * 3];
+        var weldPos = new float[vertCount * 3]; // seams are matched on the unmorphed mesh, where they line up
         var uv = new float[vertCount * 2];
         var faces = new List<(int A, int B, int C)>();
         for (var s = 0; s < shapes.Count; s++)
         {
-            Array.Copy(shapes[s].Positions, 0, pos, offsets[s] * 3, shapes[s].Positions.Length);
+            var source = positions?[s] ?? shapes[s].Positions;
+            Array.Copy(source, 0, pos, offsets[s] * 3, source.Length);
+            Array.Copy(shapes[s].Positions, 0, weldPos, offsets[s] * 3, shapes[s].Positions.Length);
             Array.Copy(shapes[s].Uvs, 0, uv, offsets[s] * 2, shapes[s].Uvs.Length);
             var idx = shapes[s].Indices;
             for (var t = 0; t + 2 < idx.Length; t += 3)
                 faces.Add(((int)idx[t] + offsets[s], (int)idx[t + 1] + offsets[s], (int)idx[t + 2] + offsets[s]));
         }
 
-        var welded = Weld(pos, vertCount, weldTolerance);
+        var welded = Weld(weldPos, vertCount, weldTolerance);
         var vertexFaces = new List<int>[vertCount];
         for (var i = 0; i < vertCount; i++) vertexFaces[i] = new List<int>();
         var faceN = new Vec[faces.Count];

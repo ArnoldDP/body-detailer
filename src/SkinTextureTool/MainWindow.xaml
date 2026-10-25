@@ -7,35 +7,37 @@
     <DockPanel>
         <Border DockPanel.Dock="Top" Padding="8" BorderBrush="#33000000" BorderThickness="0,0,0,1">
             <StackPanel Orientation="Horizontal">
-                <Button Content="Open body NIF…" Padding="12,4" Click="OnOpenNif"/>
-                <Button Content="Load preset…" Padding="10,4" Margin="12,0,0,0" Click="OnLoadPreset"/>
+                <Button Content="Add NIFs…" Padding="12,4" Click="OnAddNifs"
+                        ToolTip="Body, hands, feet, head… loaded together share one surface, so detail lines up across seams"/>
+                <Button Content="Clear meshes" Padding="10,4" Margin="6,0,0,0" Click="OnClearNifs"/>
+                <Button Content="Load preset…" Padding="10,4" Margin="18,0,0,0" Click="OnLoadPreset"/>
                 <Button Content="Save preset…" Padding="10,4" Margin="6,0,0,0" Click="OnSavePreset"/>
                 <Button Content="Reset to defaults" Padding="10,4" Margin="6,0,0,0" Click="OnResetSettings"/>
             </StackPanel>
         </Border>
 
         <Border DockPanel.Dock="Bottom" Padding="8,4" BorderBrush="#33000000" BorderThickness="0,1,0,0">
-            <TextBlock x:Name="StatusText" TextWrapping="Wrap" Text="Open a BodySlide-built body NIF to begin."/>
+            <TextBlock x:Name="StatusText" TextWrapping="Wrap" Text="Add BodySlide-built NIFs (body, hands, feet, head) to begin."/>
         </Border>
 
         <Grid>
             <Grid.ColumnDefinitions>
-                <ColumnDefinition Width="280"/>
+                <ColumnDefinition Width="290"/>
                 <ColumnDefinition Width="*"/>
-                <ColumnDefinition Width="400"/>
+                <ColumnDefinition Width="420"/>
             </Grid.ColumnDefinitions>
 
             <ScrollViewer Grid.Column="0" VerticalScrollBarVisibility="Auto">
                 <StackPanel Margin="8">
-                    <TextBlock Text="Shapes to texture" FontWeight="SemiBold"/>
-                    <TextBlock Text="Shapes sharing one texture should be baked together." TextWrapping="Wrap" Foreground="Gray" Margin="0,2,0,4"/>
+                    <TextBlock Text="Shapes" FontWeight="SemiBold"/>
+                    <TextBlock Text="Shapes are grouped by the texture they use; each group gets its own texture set." TextWrapping="Wrap" Foreground="Gray" Margin="0,2,0,4"/>
                     <ItemsControl x:Name="ShapeList">
                         <ItemsControl.ItemTemplate>
                             <DataTemplate>
                                 <CheckBox IsChecked="{Binding Selected}" Margin="0,2" Checked="OnShapeSelectionChanged" Unchecked="OnShapeSelectionChanged">
                                     <StackPanel>
                                         <TextBlock Text="{Binding Name}"/>
-                                        <TextBlock Text="{Binding Detail}" Foreground="Gray" FontSize="11"/>
+                                        <TextBlock Text="{Binding Detail}" Foreground="Gray" FontSize="11" TextWrapping="Wrap"/>
                                     </StackPanel>
                                 </CheckBox>
                             </DataTemplate>
@@ -57,18 +59,16 @@
                         <ComboBoxItem Content="4096"/>
                         <ComboBoxItem Content="8192"/>
                     </ComboBox>
-                    <TextBlock Text="File name (no extension)" Margin="0,6,0,0"/>
-                    <TextBox x:Name="ExportNameBox" Text="femalebody_1"/>
                     <TextBlock Text="Folder" Margin="0,6,0,0"/>
                     <DockPanel>
                         <Button DockPanel.Dock="Right" Content="…" Width="26" Margin="4,0,0,0" Click="OnBrowseExport"/>
                         <TextBox x:Name="ExportFolderBox"/>
                     </DockPanel>
                     <CheckBox x:Name="RfaosBox" IsChecked="True" Margin="0,6,0,0">
-                        <TextBlock TextWrapping="Wrap" Text="Also write name_rfaos.dds (Community Shaders Advanced Skin: roughness, fuzz, AO, specular)"/>
+                        <TextBlock TextWrapping="Wrap" Text="Also write _rfaos.dds (Community Shaders Advanced Skin: roughness, fuzz, AO, specular)"/>
                     </CheckBox>
-                    <TextBlock TextWrapping="Wrap" Foreground="Gray" Margin="0,4,0,0"
-                               Text="Writes name.dds, name_msn.dds, name_s.dds and name_sk.dds (BC7 with mipmaps)."/>
+                    <TextBlock x:Name="ExportInfo" TextWrapping="Wrap" Foreground="Gray" Margin="0,4,0,0"
+                               Text="Each texture group is written as name.dds, name_msn.dds, name_s.dds and name_sk.dds (BC7 with mipmaps)."/>
                     <Button x:Name="ExportButton" Content="Export textures" Margin="0,8,0,0" Padding="0,6" FontWeight="SemiBold"
                             Click="OnExport" IsEnabled="False"/>
                 </StackPanel>
@@ -77,7 +77,7 @@
             <DockPanel Grid.Column="1" Margin="0,8">
                 <StackPanel DockPanel.Dock="Top" Orientation="Horizontal" Margin="0,0,0,6">
                     <TextBlock Text="Show:" VerticalAlignment="Center" Margin="0,0,6,0"/>
-                    <ComboBox x:Name="ModeBox" Width="160" SelectedIndex="0" SelectionChanged="OnModeChanged">
+                    <ComboBox x:Name="ModeBox" Width="190" SelectedIndex="0" SelectionChanged="OnModeChanged">
                         <ComboBoxItem Content="Lit"/>
                         <ComboBoxItem Content="Colour (diffuse)"/>
                         <ComboBoxItem Content="Normal map (_msn)"/>
@@ -91,9 +91,18 @@
                 <rendering:PreviewView x:Name="Preview"/>
             </DockPanel>
 
-            <ScrollViewer Grid.Column="2" VerticalScrollBarVisibility="Auto">
-                <local:SettingsPanel x:Name="Settings" Margin="8"/>
-            </ScrollViewer>
+            <TabControl Grid.Column="2" Margin="0,4,4,4">
+                <TabItem Header="Skin">
+                    <ScrollViewer VerticalScrollBarVisibility="Auto">
+                        <local:SettingsPanel x:Name="Settings" Margin="6"/>
+                    </ScrollViewer>
+                </TabItem>
+                <TabItem Header="Normal sliders">
+                    <ScrollViewer VerticalScrollBarVisibility="Auto">
+                        <local:SliderPanel x:Name="Sliders" Margin="6"/>
+                    </ScrollViewer>
+                </TabItem>
+            </TabControl>
         </Grid>
     </DockPanel>
 </Window>

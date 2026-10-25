@@ -5,6 +5,7 @@ using System.Windows;
 using System.Windows.Controls;
 using System.Windows.Threading;
 using Microsoft.Win32;
+using SkinTextureTool.Core.BodySlide;
 using SkinTextureTool.Core.Export;
 using SkinTextureTool.Core.Generation;
 using SkinTextureTool.Core.Mesh;
@@ -18,18 +19,22 @@ public partial class MainWindow : Window
     private static readonly string StateFolder = Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.ApplicationData), "SkinTextureTool");
     private static readonly string StateFile = Path.Combine(StateFolder, "last.json");
 
-    private List<ShapeData> _shapes = new();
+    /// <summary>Loaded NIFs in load order, each with its shapes.</summary>
+    private readonly List<(string Path, List<ShapeData> Shapes)> _nifs = new();
+    private readonly HashSet<ShapeData> _unselected = new();
     private readonly Dictionary<string, int> _imageTextures = new(StringComparer.OrdinalIgnoreCase);
+    private readonly Morpher _morpher = new();
     private readonly DispatcherTimer _debounce;
+    private readonly DispatcherTimer _geometryDebounce;
     private bool _generating, _dirty;
     private bool _meshReady;
-    private string? _lastNif;
+    private IReadOnlyList<string> _groups = Array.Empty<string>();
 
     private sealed class ShapeRow : INotifyPropertyChanged
     {
         public required ShapeData Shape { get; init; }
         public string Name => Shape.Name;
-        public string Detail => $"{Shape.VertexCount} vertices · {Path.GetFileName(Shape.DiffusePath ?? "no texture")}"
+        public string Detail => $"{Path.GetFileName(Shape.NifPath)} · {Shape.VertexCount} vertices · texture {Shape.TextureName}"
                                 + (Shape.ModelSpaceNormals ? " · model-space normals" : "");
         public bool Selected { get; set; }
         public event PropertyChangedEventHandler? PropertyChanged;
@@ -39,7 +44,8 @@ public partial class MainWindow : Window
     {
         public SkinSettings Settings { get; set; } = new();
         public string? ExportFolder { get; set; }
-        public string? LastNif { get; set; }
+        public List<string> Nifs { get; set; } = new();
+        public Dictionary<string, SliderSetChoice> SliderSets { get; set; } = new(StringComparer.OrdinalIgnoreCase);
     }
 
     public MainWindow()
@@ -47,71 +53,129 @@ public partial class MainWindow : Window
         InitializeComponent();
         _debounce = new DispatcherTimer { Interval = TimeSpan.FromMilliseconds(120) };
         _debounce.Tick += (_, _) => { _debounce.Stop(); Regenerate(); };
+        _geometryDebounce = new DispatcherTimer { Interval = TimeSpan.FromMilliseconds(250) };
+        _geometryDebounce.Tick += (_, _) => { _geometryDebounce.Stop(); _ = RebuildMeshAsync(); };
 
         var state = LoadState();
         Settings.Settings = state.Settings;
+        Sliders.Settings = state.Settings;
+        Sliders.Choices = new Dictionary<string, SliderSetChoice>(state.SliderSets, StringComparer.OrdinalIgnoreCase);
         ExportFolderBox.Text = state.ExportFolder ?? "";
         Settings.Changed += () => _debounce.Start();
-        Settings.GeometryChanged += () => _ = RebuildMeshAsync();
+        Settings.GeometryChanged += () => _geometryDebounce.Start();
+        Sliders.Changed += () => _geometryDebounce.Start();
         Closing += (_, _) => SaveState();
-        if (state.LastNif != null && File.Exists(state.LastNif))
-            Loaded += async (_, _) => await OpenNifAsync(state.LastNif);
+        var saved = state.Nifs.Where(File.Exists).ToList();
+        if (saved.Count > 0) Loaded += async (_, _) => await AddNifsAsync(saved);
     }
 
-    // ---------- mesh ----------
+    // ---------- meshes ----------
 
-    private async void OnOpenNif(object sender, RoutedEventArgs e)
+    private async void OnAddNifs(object sender, RoutedEventArgs e)
     {
-        var dlg = new OpenFileDialog { Filter = "NIF mesh (*.nif)|*.nif", Title = "Open a body mesh (BodySlide output, e.g. femalebody_1.nif)" };
-        if (dlg.ShowDialog(this) == true) await OpenNifAsync(dlg.FileName);
+        var dlg = new OpenFileDialog
+        {
+            Filter = "NIF mesh (*.nif)|*.nif", Multiselect = true,
+            Title = "Add meshes (BodySlide outputs: femalebody_1.nif, femalehands_1.nif, femalefeet_1.nif, a head…)",
+        };
+        if (dlg.ShowDialog(this) == true) await AddNifsAsync(dlg.FileNames);
     }
 
-    private async Task OpenNifAsync(string path)
+    private async void OnClearNifs(object sender, RoutedEventArgs e)
     {
-        Status($"Reading {Path.GetFileName(path)}…");
-        try
+        _nifs.Clear();
+        _unselected.Clear();
+        await RefreshShapesAsync();
+    }
+
+    private async Task AddNifsAsync(IEnumerable<string> paths)
+    {
+        foreach (var path in paths)
         {
-            _shapes = await Task.Run(() => BodyMesh.Load(path));
+            if (_nifs.Any(n => string.Equals(n.Path, path, StringComparison.OrdinalIgnoreCase))) continue;
+            Status($"Reading {Path.GetFileName(path)}…");
+            try
+            {
+                var shapes = await Task.Run(() => BodyMesh.Load(path));
+                // Preselect shapes using model-space normals (skin); others (eyes, brows, hair) start unticked.
+                foreach (var s in shapes.Where(s => !s.ModelSpaceNormals)) _unselected.Add(s);
+                _nifs.Add((path, shapes));
+            }
+            catch (Exception ex)
+            {
+                Status($"Couldn't read {Path.GetFileName(path)}: {ex.Message}");
+            }
         }
-        catch (Exception ex)
-        {
-            Status("Couldn't read the mesh: " + ex.Message);
-            return;
-        }
-        // Preselect the shapes that use the main body texture: the largest model-space shape's diffuse.
-        var main = _shapes.Where(s => s.ModelSpaceNormals).OrderByDescending(s => s.VertexCount).FirstOrDefault()
-                   ?? _shapes.OrderByDescending(s => s.VertexCount).FirstOrDefault();
-        ShapeList.ItemsSource = _shapes.Select(s => new ShapeRow
-        {
-            Shape = s,
-            Selected = main != null && string.Equals(s.DiffusePath, main.DiffusePath, StringComparison.OrdinalIgnoreCase),
-        }).ToList();
-        ExportNameBox.Text = main?.DiffusePath != null ? Path.GetFileNameWithoutExtension(main.DiffusePath) : "femalebody_1";
-        _lastNif = path;
-        await RebuildMeshAsync();
+        await RefreshShapesAsync();
         Preview.Frame();
     }
 
-    private void OnShapeSelectionChanged(object sender, RoutedEventArgs e) => _ = RebuildMeshAsync();
+    private async Task RefreshShapesAsync()
+    {
+        ShapeList.ItemsSource = _nifs.SelectMany(n => n.Shapes).Select(s => new ShapeRow { Shape = s, Selected = !_unselected.Contains(s) }).ToList();
+        Sliders.SetNifs(_nifs.Select(n => (n.Path, (IReadOnlyList<ShapeData>)n.Shapes)).ToList());
+        await RebuildMeshAsync();
+    }
+
+    private void OnShapeSelectionChanged(object sender, RoutedEventArgs e)
+    {
+        if (sender is CheckBox { DataContext: ShapeRow row })
+        {
+            if (row.Selected) _unselected.Remove(row.Shape); else _unselected.Add(row.Shape);
+        }
+        _geometryDebounce.Start();
+    }
 
     private List<ShapeData> SelectedShapes() =>
-        (ShapeList.ItemsSource as IEnumerable<ShapeRow>)?.Where(r => r.Selected).Select(r => r.Shape).ToList() ?? new();
+        _nifs.SelectMany(n => n.Shapes).Where(s => !_unselected.Contains(s)).ToList();
 
+    /// <summary>
+    /// Rebuilds normals for every selected shape together (so seams between NIFs weld), with the BodySlide
+    /// slider amounts applied to a copy of each shape's positions, then regroups by texture and uploads.
+    /// </summary>
     private async Task RebuildMeshAsync()
     {
         var shapes = SelectedShapes();
         if (shapes.Count == 0)
         {
-            Status("Pick at least one shape.");
+            _meshReady = false;
+            ExportButton.IsEnabled = false;
+            _groups = Array.Empty<string>();
+            Settings.Groups = _groups;
+            await Preview.Run(() => Preview.Renderer.SetMesh(Array.Empty<(string, IReadOnlyList<MeshInput>)>()));
+            Status(_nifs.Count == 0 ? "Add BodySlide-built NIFs (body, hands, feet, head) to begin." : "Pick at least one shape.");
             return;
         }
         var degree = Settings.Settings.Normals.SmoothDegree;
+        var sets = _nifs.ToDictionary(n => n.Path, n => Sliders.SetFor(n.Path), StringComparer.OrdinalIgnoreCase);
+        var sliderValues = Settings.Settings.NormalSliders;
         Status("Rebuilding normals…");
-        var frames = await Task.Run(() => SurfaceFrames.Build(shapes, degree));
-        await Preview.Run(() => Preview.Renderer.SetMesh(shapes, frames));
+        var problems = new List<string>();
+        var frames = await Task.Run(() =>
+        {
+            var morphed = shapes.Select(s =>
+                sets.TryGetValue(s.NifPath, out var set) && set != null && sliderValues.TryGetValue(set.Name, out var values) && values.Count > 0
+                    ? _morpher.Apply(set, s.Name, s.Positions, values, problems)
+                    : s.Positions).ToList();
+            return SurfaceFrames.Build(shapes, degree, positions: morphed);
+        });
+
+        var groups = shapes.Select((s, i) => new MeshInput(s, frames[i]))
+            .GroupBy(m => m.Shape.TextureName)
+            .Select(g => (g.Key, (IReadOnlyList<MeshInput>)g.ToList()))
+            .ToList();
+        await Preview.Run(() => Preview.Renderer.SetMesh(groups));
+        var names = groups.Select(g => g.Key).ToList();
+        if (!names.SequenceEqual(_groups))
+        {
+            _groups = names;
+            Settings.Groups = names;
+        }
         _meshReady = true;
         ExportButton.IsEnabled = true;
-        Status($"{shapes.Count} shape(s), {shapes.Sum(s => s.VertexCount)} vertices.");
+        ExportInfo.Text = $"Writes {string.Join(", ", names.Select(n => n + ".dds"))} with their _msn, _s and _sk maps (BC7 with mipmaps).";
+        Status($"{shapes.Count} shape(s) in {names.Count} texture group(s): {string.Join(", ", names)}."
+               + (problems.Count > 0 ? " Slider problems: " + string.Join("; ", problems.Distinct().Take(3)) : ""));
         Regenerate();
     }
 
@@ -129,12 +193,12 @@ public partial class MainWindow : Window
         Preview.Refresh();
     }
 
-    /// <summary>Every image the current settings use: masks and the detail map.</summary>
+    /// <summary>Every image the current settings use: masks and detail maps, for all groups.</summary>
     private static IEnumerable<string> ImagePaths(SkinSettings s)
     {
         foreach (var layer in typeof(SkinSettings).GetProperties().Select(p => p.GetValue(s)).OfType<Layer>())
-            if (layer.MaskPath != null) yield return layer.MaskPath;
-        if (s.Normals.DetailMapPath != null) yield return s.Normals.DetailMapPath;
+            foreach (var path in layer.MaskPaths.Values) yield return path;
+        foreach (var path in s.Normals.DetailMaps.Values) yield return path;
     }
 
     /// <summary>Loads any images not on the GPU yet; images that fail to load are skipped with a message.</summary>
@@ -191,13 +255,14 @@ public partial class MainWindow : Window
         if (dlg.ShowDialog(this) == true) ExportFolderBox.Text = dlg.FolderName;
     }
 
-    private async void OnExport(object sender, RoutedEventArgs e)
+    private async void OnExport(object sender, RoutedEventArgs e) => await ExportAsync();
+
+    private async Task ExportAsync()
     {
         var folder = ExportFolderBox.Text.Trim();
-        var name = ExportNameBox.Text.Trim();
-        if (folder.Length == 0 || name.Length == 0)
+        if (folder.Length == 0)
         {
-            Status("Choose an export folder and file name first.");
+            Status("Choose an export folder first.");
             return;
         }
         ExportButton.IsEnabled = false;
@@ -207,31 +272,35 @@ public partial class MainWindow : Window
             await EnsureImagesAsync(snapshot);
             var images = new Dictionary<string, int>(_imageTextures, StringComparer.OrdinalIgnoreCase);
             var size = ExportSize;
-            var preview = PreviewSize;
-            Status($"Generating at {size}×{size}…");
-            var textures = await Preview.Run(() =>
-            {
-                Preview.Renderer.Generate(snapshot, size, images);
-                var t = Preview.Renderer.Read();
-                Preview.Renderer.Generate(snapshot, preview, images); // back to the preview size
-                return t;
-            });
-            Status("Compressing to BC7… (this takes a while at large sizes)");
             var rfaos = RfaosBox.IsChecked == true;
-            await Task.Run(() =>
+            var written = new List<string>();
+            foreach (var group in _groups)
             {
-                var jobs = new List<Action>
+                Status($"Generating {group} at {size}×{size}…");
+                var textures = await Preview.Run(() =>
                 {
-                    () => DdsExporter.WriteBc7(Path.Combine(folder, name + ".dds"), textures.Albedo, size, size),
-                    () => DdsExporter.WriteBc7(Path.Combine(folder, name + "_msn.dds"), textures.Normal, size, size),
-                    () => DdsExporter.WriteBc7(Path.Combine(folder, name + "_s.dds"), textures.Specular, size, size),
-                    () => DdsExporter.WriteBc7(Path.Combine(folder, name + "_sk.dds"), textures.Subsurface, size, size),
-                };
-                if (rfaos) jobs.Add(() => DdsExporter.WriteBc7(Path.Combine(folder, name + "_rfaos.dds"), textures.Rfaos, size, size));
-                Parallel.Invoke(jobs.ToArray());
-            });
+                    Preview.Renderer.Generate(snapshot, size, images, group);
+                    return Preview.Renderer.Read(group);
+                });
+                Status($"Compressing {group} to BC7… (this takes a while at large sizes)");
+                await Task.Run(() =>
+                {
+                    var jobs = new List<Action>
+                    {
+                        () => DdsExporter.WriteBc7(Path.Combine(folder, group + ".dds"), textures.Albedo, size, size),
+                        () => DdsExporter.WriteBc7(Path.Combine(folder, group + "_msn.dds"), textures.Normal, size, size),
+                        () => DdsExporter.WriteBc7(Path.Combine(folder, group + "_s.dds"), textures.Specular, size, size),
+                        () => DdsExporter.WriteBc7(Path.Combine(folder, group + "_sk.dds"), textures.Subsurface, size, size),
+                    };
+                    if (rfaos) jobs.Add(() => DdsExporter.WriteBc7(Path.Combine(folder, group + "_rfaos.dds"), textures.Rfaos, size, size));
+                    Parallel.Invoke(jobs.ToArray());
+                });
+                written.Add(group);
+            }
+            var preview = PreviewSize;
+            await Preview.Run(() => Preview.Renderer.Generate(snapshot, preview, images)); // back to the preview size
             SaveState();
-            Status($"Exported {name}.dds, {name}_msn.dds, {name}_s.dds, {name}_sk.dds{(rfaos ? $" and {name}_rfaos.dds" : "")} to {folder}.");
+            Status($"Exported {string.Join(", ", written)} (diffuse, _msn, _s, _sk{(rfaos ? ", _rfaos" : "")}) to {folder}.");
         }
         catch (Exception ex)
         {
@@ -243,13 +312,12 @@ public partial class MainWindow : Window
         }
     }
 
-    /// <summary>Command-line export: open, generate and export without user input. Writes a log next to the textures.</summary>
-    public async Task ExportHeadless(string nif, string folder)
+    /// <summary>Command-line export: add the NIFs, generate with the saved settings, export, and log the result.</summary>
+    public async Task ExportHeadless(string folder, IReadOnlyList<string> nifs)
     {
-        await OpenNifAsync(nif);
+        await AddNifsAsync(nifs);
         ExportFolderBox.Text = folder;
-        OnExport(this, new RoutedEventArgs());
-        while (!ExportButton.IsEnabled) await Task.Delay(200);
+        await ExportAsync();
         File.WriteAllText(Path.Combine(folder, "export.log"), StatusText.Text);
     }
 
@@ -280,10 +348,10 @@ public partial class MainWindow : Window
 
     private void ApplySettings(SkinSettings settings)
     {
-        var smoothingChanged = Math.Abs(settings.Normals.SmoothDegree - Settings.Settings.Normals.SmoothDegree) > 0.01f;
         Settings.Settings = settings;
-        if (smoothingChanged) _ = RebuildMeshAsync();
-        else Regenerate();
+        Sliders.Settings = settings;
+        Sliders.SetNifs(_nifs.Select(n => (n.Path, (IReadOnlyList<ShapeData>)n.Shapes)).ToList());
+        _ = RebuildMeshAsync(); // smoothing and sliders may have changed
     }
 
     private static State LoadState()
@@ -308,7 +376,8 @@ public partial class MainWindow : Window
             {
                 Settings = Settings.Settings,
                 ExportFolder = string.IsNullOrWhiteSpace(ExportFolderBox.Text) ? null : ExportFolderBox.Text.Trim(),
-                LastNif = _lastNif,
+                Nifs = _nifs.Select(n => n.Path).ToList(),
+                SliderSets = Sliders.Choices,
             };
             File.WriteAllText(StateFile, JsonSerializer.Serialize(state, new JsonSerializerOptions { WriteIndented = true }));
         }

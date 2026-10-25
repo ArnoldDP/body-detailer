@@ -17,10 +17,10 @@ public partial class App : Application
 
         base.OnStartup(e);
         var window = new MainWindow();
-        // --export <nif> <folder>: open the body, generate with the saved settings, export the textures and quit.
+        // --export <folder> <nif>...: load the meshes, generate with the saved settings, export the textures and quit.
         // Hooked before Show, which can raise Loaded before it returns.
         if (e.Args.Length >= 3 && e.Args[0] == "--export")
-            window.Loaded += async (_, _) => { await window.ExportHeadless(e.Args[1], e.Args[2]); Shutdown(); };
+            window.Loaded += async (_, _) => { await window.ExportHeadless(e.Args[1], e.Args.Skip(2).ToList()); Shutdown(); };
         window.Show();
     }
 

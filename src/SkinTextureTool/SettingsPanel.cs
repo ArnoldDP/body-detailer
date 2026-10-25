@@ -31,6 +31,15 @@ public sealed class SettingsPanel : StackPanel
         set { _settings = value; Rebuild(); }
     }
 
+    private IReadOnlyList<string> _groups = Array.Empty<string>();
+
+    /// <summary>The loaded texture groups (texture names); masks and detail maps are chosen per group.</summary>
+    public IReadOnlyList<string> Groups
+    {
+        get => _groups;
+        set { _groups = value; Rebuild(); }
+    }
+
     private static readonly string[] TopLevelOrder = { nameof(SkinSettings.Scale), nameof(SkinSettings.Seed), nameof(SkinSettings.UseUvCoordinates) };
 
     private void Rebuild()
@@ -53,10 +62,12 @@ public sealed class SettingsPanel : StackPanel
             header.Children.Add(enabled);
             header.Children.Add(Bold(Spaced(prop.Name)));
 
-            foreach (var p in layer.GetType().GetProperties().Where(p => p.Name is not nameof(Layer.Enabled) and not nameof(Layer.MaskPath)))
+            foreach (var p in layer.GetType().GetProperties().Where(p => p.Name is not nameof(Layer.Enabled) and not nameof(Layer.MaskPaths)))
                 AddProperty(body, layer, p, prop.Name);
             if (layer.GetType().GetCustomAttribute<MaskableAttribute>() != null)
-                AddFilePicker(body, "Mask", () => layer.MaskPath, v => layer.MaskPath = v);
+                AddPerGroupPickers(body, "Mask", layer.MaskPaths);
+            if (layer is NormalLayer normals)
+                AddPerGroupPickers(body, "Detail map", normals.DetailMaps);
 
             Children.Add(new Expander { Header = header, Content = body, Margin = new Thickness(0, 0, 0, 4) });
         }
@@ -115,10 +126,20 @@ public sealed class SettingsPanel : StackPanel
             right.Children.Add(box);
             panel.Children.Add(Row(label, right, null));
         }
-        else if (p.PropertyType == typeof(string) && p.Name == nameof(NormalLayer.DetailMapPath))
+    }
+
+    /// <summary>One image picker per loaded texture group, stored in <paramref name="paths"/> by group name.</summary>
+    private void AddPerGroupPickers(Panel panel, string label, Dictionary<string, string> paths)
+    {
+        if (_groups.Count == 0)
         {
-            AddFilePicker(panel, "Detail map", () => (string?)p.GetValue(owner), v => p.SetValue(owner, v));
+            panel.Children.Add(new TextBlock { Text = $"{label}: load a mesh to choose images.", Foreground = Brushes.Gray, Margin = new Thickness(0, 2, 0, 2) });
+            return;
         }
+        foreach (var group in _groups)
+            AddFilePicker(panel, _groups.Count == 1 ? label : $"{label} ({group})",
+                () => paths.TryGetValue(group, out var v) ? v : null,
+                v => { if (v == null) paths.Remove(group); else paths[group] = v; });
     }
 
     private void AddSeed(Panel panel, object owner, PropertyInfo p)

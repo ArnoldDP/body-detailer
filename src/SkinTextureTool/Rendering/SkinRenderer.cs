@@ -8,28 +8,39 @@ namespace SkinTextureTool.Rendering;
 /// <summary>RGBA pixels, top row first.</summary>
 public sealed record ImageData(int Width, int Height, byte[] Rgba);
 
-/// <summary>The four textures the tool exports, as RGBA with row 0 at v = 0 (the DDS layout).</summary>
+/// <summary>The textures the tool exports, as RGBA with row 0 at v = 0 (the DDS layout).</summary>
 public sealed record GeneratedTextures(int Size, byte[] Albedo, byte[] Normal, byte[] Specular, byte[] Subsurface, byte[] Rfaos);
 
+/// <summary>A shape ready to upload: its mesh and the surface frames baked from it.</summary>
+public sealed record MeshInput(ShapeData Shape, SurfaceFrames Frames);
+
 /// <summary>
-/// Owns every GL resource: the selected shapes' buffers, the generation targets and the preview program.
-/// All methods must run with the preview's GL context current.
+/// Owns every GL resource: per texture group (shapes sharing one diffuse texture) the shapes' buffers and the
+/// generated textures, plus the programs. All methods must run with the preview's GL context current.
 /// </summary>
 internal sealed class SkinRenderer
 {
     private sealed record GpuShape(int Vao, int[] Buffers, int IndexCount);
 
+    /// <summary>One texture set and the shapes drawn with it. The "A" textures hold the finished result.</summary>
+    private sealed class Group
+    {
+        public required string Name { get; init; }
+        public List<GpuShape> Shapes { get; } = new();
+        public int Size;
+        public int Albedo, Height, Spec, Sss, Normal, Rfaos;
+        public int AlbedoB, SpecB, SssB, NormalB, RfaosB;
+        public bool Ready;
+        public IEnumerable<int> All => new[] { Albedo, Height, Spec, Sss, Normal, Rfaos, AlbedoB, SpecB, SssB, NormalB, RfaosB };
+    }
+
     private GlProgram? _generate, _bake, _bleed, _preview;
-    private readonly List<GpuShape> _shapes = new();
+    private readonly List<Group> _groups = new();
     private int _emptyVao;
-    private int _size;
-    private int _albedo, _height, _spec, _sss, _normal, _rfaos;   // final (after bleed) textures live in the "A" set
-    private int _albedoB, _specB, _sssB, _normalB, _rfaosB;
     private int _fbo;
     private readonly Dictionary<string, int> _images = new(StringComparer.OrdinalIgnoreCase);
 
-    public bool HasMesh => _shapes.Count > 0;
-    public bool HasTextures { get; private set; }
+    public bool HasMesh => _groups.Count > 0;
     public Vector3 Centre { get; private set; }
     public float Radius { get; private set; } = 60f;
 
@@ -51,41 +62,48 @@ internal sealed class SkinRenderer
         _fbo = GL.GenFramebuffer();
     }
 
-    public void SetMesh(IReadOnlyList<ShapeData> shapes, IReadOnlyList<SurfaceFrames> frames)
+    /// <summary>Replaces the mesh: one group per texture name, each with its shapes.</summary>
+    public void SetMesh(IReadOnlyList<(string Name, IReadOnlyList<MeshInput> Shapes)> groups)
     {
-        foreach (var s in _shapes) { GL.DeleteVertexArray(s.Vao); GL.DeleteBuffers(s.Buffers.Length, s.Buffers); }
-        _shapes.Clear();
-        HasTextures = false;
+        foreach (var g in _groups)
+        {
+            foreach (var s in g.Shapes) { GL.DeleteVertexArray(s.Vao); GL.DeleteBuffers(s.Buffers.Length, s.Buffers); }
+            foreach (var t in g.All) if (t != 0) GL.DeleteTexture(t);
+        }
+        _groups.Clear();
 
         var min = new Vector3(float.MaxValue);
         var max = new Vector3(float.MinValue);
-        for (var i = 0; i < shapes.Count; i++)
+        foreach (var (name, shapes) in groups)
         {
-            var s = shapes[i];
-            var f = frames[i];
-            var vao = GL.GenVertexArray();
-            GL.BindVertexArray(vao);
-            var buffers = new int[7];
-            GL.GenBuffers(7, buffers);
-            Attribute(buffers[0], 0, 3, s.Positions);
-            Attribute(buffers[1], 1, 2, s.Uvs);
-            Attribute(buffers[2], 2, 3, f.Normals);
-            Attribute(buffers[3], 3, 3, f.Tangents);
-            Attribute(buffers[4], 4, 3, f.Bitangents);
-            Attribute(buffers[5], 5, 2, f.UvScales);
-            GL.BindBuffer(BufferTarget.ElementArrayBuffer, buffers[6]);
-            GL.BufferData(BufferTarget.ElementArrayBuffer, s.Indices.Length * sizeof(uint), s.Indices, BufferUsageHint.StaticDraw);
-            GL.BindVertexArray(0);
-            _shapes.Add(new GpuShape(vao, buffers, s.Indices.Length));
-
-            for (var v = 0; v < s.Positions.Length; v += 3)
+            var group = new Group { Name = name };
+            foreach (var (s, f) in shapes)
             {
-                var p = new Vector3(s.Positions[v], s.Positions[v + 1], s.Positions[v + 2]);
-                min = Vector3.ComponentMin(min, p);
-                max = Vector3.ComponentMax(max, p);
+                var vao = GL.GenVertexArray();
+                GL.BindVertexArray(vao);
+                var buffers = new int[7];
+                GL.GenBuffers(7, buffers);
+                Attribute(buffers[0], 0, 3, s.Positions);
+                Attribute(buffers[1], 1, 2, s.Uvs);
+                Attribute(buffers[2], 2, 3, f.Normals);
+                Attribute(buffers[3], 3, 3, f.Tangents);
+                Attribute(buffers[4], 4, 3, f.Bitangents);
+                Attribute(buffers[5], 5, 2, f.UvScales);
+                GL.BindBuffer(BufferTarget.ElementArrayBuffer, buffers[6]);
+                GL.BufferData(BufferTarget.ElementArrayBuffer, s.Indices.Length * sizeof(uint), s.Indices, BufferUsageHint.StaticDraw);
+                GL.BindVertexArray(0);
+                group.Shapes.Add(new GpuShape(vao, buffers, s.Indices.Length));
+
+                for (var v = 0; v < s.Positions.Length; v += 3)
+                {
+                    var p = new Vector3(s.Positions[v], s.Positions[v + 1], s.Positions[v + 2]);
+                    min = Vector3.ComponentMin(min, p);
+                    max = Vector3.ComponentMax(max, p);
+                }
             }
+            _groups.Add(group);
         }
-        if (_shapes.Count > 0)
+        if (_groups.Count > 0)
         {
             Centre = (min + max) / 2;
             Radius = (max - min).Length / 2;
@@ -121,23 +139,22 @@ internal sealed class SkinRenderer
         if (_images.Remove(key, out var id)) GL.DeleteTexture(id);
     }
 
-    private void EnsureTargets(int size)
+    private static void EnsureTargets(Group g, int size)
     {
-        if (_size == size) return;
-        foreach (var t in new[] { _albedo, _height, _spec, _sss, _normal, _rfaos, _albedoB, _specB, _sssB, _normalB, _rfaosB })
-            if (t != 0) GL.DeleteTexture(t);
-        _size = size;
-        _albedo = Target(size, PixelInternalFormat.Rgba8);
-        _height = Target(size, PixelInternalFormat.Rgba16f);
-        _spec = Target(size, PixelInternalFormat.Rgba8);
-        _sss = Target(size, PixelInternalFormat.Rgba8);
-        _normal = Target(size, PixelInternalFormat.Rgba8);
-        _albedoB = Target(size, PixelInternalFormat.Rgba8);
-        _specB = Target(size, PixelInternalFormat.Rgba8);
-        _sssB = Target(size, PixelInternalFormat.Rgba8);
-        _normalB = Target(size, PixelInternalFormat.Rgba8);
-        _rfaos = Target(size, PixelInternalFormat.Rgba8);
-        _rfaosB = Target(size, PixelInternalFormat.Rgba8);
+        if (g.Size == size) return;
+        foreach (var t in g.All) if (t != 0) GL.DeleteTexture(t);
+        g.Size = size;
+        g.Albedo = Target(size, PixelInternalFormat.Rgba8);
+        g.Height = Target(size, PixelInternalFormat.Rgba16f);
+        g.Spec = Target(size, PixelInternalFormat.Rgba8);
+        g.Sss = Target(size, PixelInternalFormat.Rgba8);
+        g.Normal = Target(size, PixelInternalFormat.Rgba8);
+        g.Rfaos = Target(size, PixelInternalFormat.Rgba8);
+        g.AlbedoB = Target(size, PixelInternalFormat.Rgba8);
+        g.SpecB = Target(size, PixelInternalFormat.Rgba8);
+        g.SssB = Target(size, PixelInternalFormat.Rgba8);
+        g.NormalB = Target(size, PixelInternalFormat.Rgba8);
+        g.RfaosB = Target(size, PixelInternalFormat.Rgba8);
     }
 
     private static int Target(int size, PixelInternalFormat format)
@@ -161,9 +178,9 @@ internal sealed class SkinRenderer
         GL.DrawBuffers(textures.Length, Enumerable.Range(0, textures.Length).Select(i => DrawBuffersEnum.ColorAttachment0 + i).ToArray());
     }
 
-    private void DrawShapes()
+    private static void DrawShapes(Group g)
     {
-        foreach (var s in _shapes)
+        foreach (var s in g.Shapes)
         {
             GL.BindVertexArray(s.Vao);
             GL.DrawElements(PrimitiveType.Triangles, s.IndexCount, DrawElementsType.UnsignedInt, 0);
@@ -172,58 +189,68 @@ internal sealed class SkinRenderer
     }
 
     /// <summary>
-    /// Runs the full pipeline into textures of the given size. <paramref name="images"/> maps file paths to
-    /// already-uploaded textures for masks and the detail map.
+    /// Runs the full pipeline for every group (or just <paramref name="only"/>) into textures of the given size.
+    /// <paramref name="images"/> maps file paths to uploaded textures for masks and detail maps.
     /// </summary>
-    public void Generate(SkinSettings s, int size, IReadOnlyDictionary<string, int> images)
+    public void Generate(SkinSettings s, int size, IReadOnlyDictionary<string, int> images, string? only = null)
     {
-        if (_shapes.Count == 0 || _generate == null || _bake == null || _bleed == null) return;
+        if (_generate == null || _bake == null || _bleed == null) return;
         GL.GetInteger(GetPName.FramebufferBinding, out int previousFbo);
         var previousViewport = new int[4];
         GL.GetInteger(GetPName.Viewport, previousViewport);
-
-        EnsureTargets(size);
         GL.Disable(EnableCap.DepthTest);
         GL.Disable(EnableCap.CullFace);
         GL.Disable(EnableCap.Blend);
         GL.Viewport(0, 0, size, size);
 
+        foreach (var g in _groups.Where(g => only == null || g.Name == only))
+            GenerateGroup(g, s, size, images);
+
+        GL.BindFramebuffer(FramebufferTarget.Framebuffer, previousFbo);
+        GL.Viewport(previousViewport[0], previousViewport[1], previousViewport[2], previousViewport[3]);
+    }
+
+    private int Image(IReadOnlyDictionary<string, int> images, string? path) =>
+        path != null && images.TryGetValue(path, out var t) ? t : 0;
+
+    private void GenerateGroup(Group g, SkinSettings s, int size, IReadOnlyDictionary<string, int> images)
+    {
+        EnsureTargets(g, size);
+
         // 1. skin layers
-        BindTargets(_albedo, _height, _spec, _sss, _rfaos);
+        BindTargets(g.Albedo, g.Height, g.Spec, g.Sss, g.Rfaos);
         GL.ClearColor(0, 0, 0, 0);
         GL.Clear(ClearBufferMask.ColorBufferBit);
-        _generate.Use();
+        _generate!.Use();
         SetLayerUniforms(_generate, s);
         var unit = 0;
         foreach (var (name, layer) in Masks)
         {
-            var path = layer(s).MaskPath;
-            var has = path != null && images.TryGetValue(path, out var tex) && tex != 0;
-            _generate.Texture("m" + name, unit++, has ? images[path!] : 0);
-            _generate.Set("h" + name, has ? 1 : 0);
+            var tex = Image(images, layer(s).MaskFor(g.Name));
+            _generate.Texture("m" + name, unit++, tex);
+            _generate.Set("h" + name, tex != 0 ? 1 : 0);
         }
-        DrawShapes();
+        DrawShapes(g);
 
         // 2. model-space normal bake
-        BindTargets(_normal);
+        BindTargets(g.Normal);
         GL.Clear(ClearBufferMask.ColorBufferBit);
-        _bake.Use();
-        _bake.Texture("uHeight", 0, _height);
+        _bake!.Use();
+        _bake.Texture("uHeight", 0, g.Height);
         _bake.Set("uTexel", new Vector2(1f / size, 1f / size));
         _bake.Set("uDetailStrength", s.Normals.Enabled ? s.Normals.DetailStrength : 0f);
-        var detail = s.Normals.DetailMapPath;
-        var hasDetail = s.Normals.Enabled && detail != null && images.TryGetValue(detail, out var dt) && dt != 0;
-        _bake.Texture("uDetailMap", 1, hasDetail ? images[detail!] : 0);
-        _bake.Set("uHasDetailMap", hasDetail ? 1 : 0);
+        var detail = s.Normals.Enabled ? Image(images, s.Normals.DetailMapFor(g.Name)) : 0;
+        _bake.Texture("uDetailMap", 1, detail);
+        _bake.Set("uHasDetailMap", detail != 0 ? 1 : 0);
         _bake.Set("uDetailMapStrength", s.Normals.DetailMapStrength);
         _bake.Set("uZCorrection", s.Normals.TangentZCorrection ? 1 : 0);
-        DrawShapes();
+        DrawShapes(g);
 
         // 3. bleed past island edges, ping-ponging between the two texture sets
-        _bleed.Use();
+        _bleed!.Use();
         GL.BindVertexArray(_emptyVao);
         var iterations = Math.Max(8, size / 128);
-        int[] a = { _albedo, _normal, _spec, _sss, _rfaos }, b = { _albedoB, _normalB, _specB, _sssB, _rfaosB };
+        int[] a = { g.Albedo, g.Normal, g.Spec, g.Sss, g.Rfaos }, b = { g.AlbedoB, g.NormalB, g.SpecB, g.SssB, g.RfaosB };
         for (var i = 0; i < iterations; i++)
         {
             BindTargets(b);
@@ -232,8 +259,8 @@ internal sealed class SkinRenderer
             (a, b) = (b, a);
         }
         GL.BindVertexArray(0);
-        (_albedo, _normal, _spec, _sss, _rfaos) = (a[0], a[1], a[2], a[3], a[4]);
-        (_albedoB, _normalB, _specB, _sssB, _rfaosB) = (b[0], b[1], b[2], b[3], b[4]);
+        (g.Albedo, g.Normal, g.Spec, g.Sss, g.Rfaos) = (a[0], a[1], a[2], a[3], a[4]);
+        (g.AlbedoB, g.NormalB, g.SpecB, g.SssB, g.RfaosB) = (b[0], b[1], b[2], b[3], b[4]);
 
         foreach (var t in a)
         {
@@ -241,10 +268,7 @@ internal sealed class SkinRenderer
             GL.GenerateMipmap(GenerateMipmapTarget.Texture2D);
             GL.TexParameter(TextureTarget.Texture2D, TextureParameterName.TextureMinFilter, (int)TextureMinFilter.LinearMipmapLinear);
         }
-
-        GL.BindFramebuffer(FramebufferTarget.Framebuffer, previousFbo);
-        GL.Viewport(previousViewport[0], previousViewport[1], previousViewport[2], previousViewport[3]);
-        HasTextures = true;
+        g.Ready = true;
     }
 
     private static Vector3 C(Rgb c) => new(c.R, c.G, c.B);
@@ -291,29 +315,35 @@ internal sealed class SkinRenderer
         _preview.Set("uEye", eye);
         _preview.Set("uLight", light);
         _preview.Set("uMode", mode);
-        _preview.Set("uReady", HasTextures ? 1 : 0);
-        if (HasTextures)
+        foreach (var g in _groups)
         {
-            _preview.Texture("uAlbedo", 0, _albedo);
-            _preview.Texture("uNormal", 1, _normal);
-            _preview.Texture("uSpec", 2, _spec);
-            _preview.Texture("uSss", 3, _sss);
-            _preview.Texture("uRfaos", 4, _rfaos);
+            _preview.Set("uReady", g.Ready ? 1 : 0);
+            if (g.Ready)
+            {
+                _preview.Texture("uAlbedo", 0, g.Albedo);
+                _preview.Texture("uNormal", 1, g.Normal);
+                _preview.Texture("uSpec", 2, g.Spec);
+                _preview.Texture("uSss", 3, g.Sss);
+                _preview.Texture("uRfaos", 4, g.Rfaos);
+            }
+            DrawShapes(g);
         }
-        DrawShapes();
     }
 
-    /// <summary>Reads the current textures back for export: RGBA, row 0 at v = 0, alpha forced opaque.</summary>
-    public GeneratedTextures Read()
+    public IReadOnlyList<string> GroupNames => _groups.Select(g => g.Name).ToList();
+
+    /// <summary>Reads one group's textures back for export: RGBA, row 0 at v = 0.</summary>
+    public GeneratedTextures Read(string group)
     {
+        var g = _groups.First(x => x.Name == group);
         byte[] Get(int tex, bool keepAlpha = false)
         {
-            var data = new byte[_size * _size * 4];
+            var data = new byte[g.Size * g.Size * 4];
             GL.BindTexture(TextureTarget.Texture2D, tex);
             GL.GetTexImage(TextureTarget.Texture2D, 0, PixelFormat.Rgba, PixelType.UnsignedByte, data);
             if (!keepAlpha) for (var i = 3; i < data.Length; i += 4) data[i] = 255;
             return data;
         }
-        return new GeneratedTextures(_size, Get(_albedo), Get(_normal), Get(_spec), Get(_sss), Get(_rfaos, keepAlpha: true));
+        return new GeneratedTextures(g.Size, Get(g.Albedo), Get(g.Normal), Get(g.Spec), Get(g.Sss), Get(g.Rfaos, keepAlpha: true));
     }
 }

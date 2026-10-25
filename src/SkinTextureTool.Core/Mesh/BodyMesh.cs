@@ -6,6 +6,8 @@ namespace SkinTextureTool.Core.Mesh;
 public sealed class ShapeData
 {
     public required string Name { get; init; }
+    /// <summary>The NIF the shape came from; shapes from several NIFs can be loaded together.</summary>
+    public required string NifPath { get; init; }
     public required float[] Positions { get; init; } // xyz
     public required float[] Uvs { get; init; }       // uv, v down as in the texture
     public required uint[] Indices { get; init; }
@@ -13,6 +15,9 @@ public sealed class ShapeData
     public bool ModelSpaceNormals { get; init; }
 
     public int VertexCount => Positions.Length / 3;
+
+    /// <summary>Shapes that use the same diffuse texture are generated into one texture set, named after it.</summary>
+    public string TextureName => DiffusePath != null ? Path.GetFileNameWithoutExtension(DiffusePath).ToLowerInvariant() : Name.ToLowerInvariant();
     public int TriangleCount => Indices.Length / 3;
 }
 
@@ -62,6 +67,7 @@ public static class BodyMesh
             shapes.Add(new ShapeData
             {
                 Name = shape.name.get(),
+                NifPath = path,
                 Positions = pos, Uvs = uv, Indices = idx,
                 DiffusePath = string.IsNullOrWhiteSpace(diffuse) ? null : diffuse,
                 ModelSpaceNormals = msn,

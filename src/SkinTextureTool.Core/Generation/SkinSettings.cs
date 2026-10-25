@@ -29,8 +29,13 @@ public sealed record Rgb(float R, float G, float B)
 public abstract class Layer
 {
     public bool Enabled { get; set; } = true;
-    /// <summary>Path to a greyscale mask image in the body's UV layout, for layers marked [Maskable].</summary>
-    public string? MaskPath { get; set; }
+    /// <summary>
+    /// Greyscale mask images for layers marked [Maskable], one per texture group (keyed by texture name such as
+    /// femalebody_1), since each group has its own UV layout. White means full effect.
+    /// </summary>
+    public Dictionary<string, string> MaskPaths { get; set; } = new(StringComparer.OrdinalIgnoreCase);
+
+    public string? MaskFor(string group) => MaskPaths.TryGetValue(group, out var p) ? p : null;
 }
 
 public sealed class BaseLayer : Layer
@@ -112,8 +117,9 @@ public sealed class NormalLayer : Layer
 {
     [Range(0, 3)] public float DetailStrength { get; set; } = 1f;
     [Range(0, 180)] public float SmoothDegree { get; set; } = 60f;
-    /// <summary>An optional tangent-space detail normal map (in the body's UVs) blended in, as in MuDynamicNormalMap.</summary>
-    public string? DetailMapPath { get; set; }
+    /// <summary>Optional tangent-space detail normal maps blended in, as in MuDynamicNormalMap, one per texture group.</summary>
+    public Dictionary<string, string> DetailMaps { get; set; } = new(StringComparer.OrdinalIgnoreCase);
+    public string? DetailMapFor(string group) => DetailMaps.TryGetValue(group, out var p) ? p : null;
     [Range(0, 1)] public float DetailMapStrength { get; set; } = 1f;
     public bool TangentZCorrection { get; set; } = true;
 }
@@ -142,6 +148,12 @@ public sealed class SkinSettings
     public VeinsLayer Veins { get; set; } = new();
     public MaterialLayer Material { get; set; } = new();
     public NormalLayer Normals { get; set; } = new();
+
+    /// <summary>
+    /// BodySlide slider amounts that reshape only the normal bake, per slider set name: slider name to amount
+    /// (1 = +100%), on top of the mesh as built.
+    /// </summary>
+    public Dictionary<string, Dictionary<string, float>> NormalSliders { get; set; } = new(StringComparer.OrdinalIgnoreCase);
 
     private static readonly JsonSerializerOptions Json = new()
     {
