@@ -118,14 +118,14 @@ public sealed class NeckFixPanel : StackPanel
             var (result, report) = await Task.Run(() =>
             {
                 var r = NeckReshaper.Reshape(head, body, band);
-                return (r, r.SeamVertices == 0 ? null : HeadExporter.Export(head, r.Positions, output));
+                return (r, r.SeamVertices == 0 ? null : HeadExporter.Export(head, r.Positions, output, r.Merges));
             });
             if (report == null)
             {
                 _info.Text = $"{head.Name}'s neck edge doesn't touch {body.Name}'s neck edge, so there's nothing to fix. Are they built for each other?";
                 return;
             }
-            _info.Text = $"Moved {result.MovedVertices} vertices ({result.SeamVertices} on the seam, at most {result.LargestMove:0.00} units).\n"
+            _info.Text = $"Moved {result.MovedVertices} vertices ({result.SeamVertices} on the seam, {result.Merges.Count} merged into a neighbour so the edge matches the body's points; at most {result.LargestMove:0.00} units).\n"
                        + $"Wrote {Path.GetRelativePath(output, report.NifPath)}\n"
                        + $"and {report.TriPaths.Count} .tri file(s):\n  " + string.Join("\n  ", report.TriPaths.Select(p => Path.GetRelativePath(output, p)))
                        + (report.Skipped.Count > 0 ? "\nSkipped:\n  " + string.Join("\n  ", report.Skipped) : "")

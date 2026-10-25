@@ -3,13 +3,16 @@ using SkinTextureTool.Core.Mesh;
 namespace SkinTextureTool.Core.NeckFix;
 
 /// <summary>
-/// Reshapes the bottom of a head's neck so it meets the body: every neck-edge vertex is moved onto the body's
-/// neck edge, and a band above it is bent so the head's surface leaves the seam in the same direction the body's
-/// surface arrives. Above the band the head is untouched.
+/// Reshapes the bottom of a head's neck so it meets the body: neck-edge vertices that match a body vertex are
+/// snapped onto it exactly, the extra ones a high-poly head has in between are merged into the nearest matching
+/// neighbour (so the head's last loop has the body's points and no T-junctions), and a band above is bent so the
+/// head's surface leaves the seam in the same direction the body's surface arrives. Above the band the head is
+/// untouched. The vertex count never changes, so .tri morphs and skin weights stay compatible.
 /// </summary>
 public static class NeckReshaper
 {
-    public sealed record Result(float[] Positions, int MovedVertices, int SeamVertices, float LargestMove);
+    /// <param name="Merges">In-between edge vertex → the neighbour it was merged into (copy its weights and morphs).</param>
+    public sealed record Result(float[] Positions, int MovedVertices, int SeamVertices, float LargestMove, IReadOnlyDictionary<int, int> Merges);
 
     /// <param name="band">Height in world units over which the head is bent to continue the body.</param>
     public static Result Reshape(ShapeData head, ShapeData body, float band = 4f, float reach = 0.1f)
@@ -20,7 +23,6 @@ public static class NeckReshaper
         var bodyEdgeVerts = bodyEdges.SelectMany(e => new[] { e.A, e.B }).Distinct().ToList();
         var bodyTangent = EdgeTangents(body, bodyEdgeVerts);
 
-        var bodyNormal = VertexNormals(body);
         (Vec Target, Vec Up, float Dist) Nearest(Vec p)
         {
             float best = float.MaxValue; Vec target = default, up = default;
@@ -34,14 +36,6 @@ public static class NeckReshaper
                 if (d2 >= best) continue;
                 best = d2; target = q;
                 up = (bodyTangent[a] * (1 - t) + bodyTangent[b] * t).Normalized();
-                // A head vertex landing part-way along a body edge (a T-junction) leaves pixel cracks when drawn;
-                // tucking it a hair under the body's edge lets the head overlap and cover them.
-                var mid = MathF.Min(t, 1 - t) * MathF.Sqrt(len2);
-                if (mid > 0.01f)
-                {
-                    var n = (bodyNormal[a] * (1 - t) + bodyNormal[b] * t).Normalized();
-                    target = target - up * 0.03f - n * 0.015f;
-                }
             }
             return (target, up, MathF.Sqrt(best));
         }
@@ -55,7 +49,45 @@ public static class NeckReshaper
             if (dist < reach) seam.Add((v, target, up));
         }
         var result = (float[])hp.Clone();
-        if (seam.Count == 0) return new Result(result, 0, 0, 0);
+        if (seam.Count == 0) return new Result(result, 0, 0, 0, new Dictionary<int, int>());
+
+        // Anchors: seam vertices sitting on a body vertex; they snap onto it exactly. Every other seam vertex is
+        // merged into the anchor it reaches first walking along the head's edge (the nearer one either way).
+        const float match = 0.01f;
+        var anchorPos = new Dictionary<int, Vec>();
+        foreach (var (v, _, _) in seam)
+        {
+            var p = V(hp, v);
+            var j = bodyEdgeVerts.MinBy(j => (V(bp, j) - p).LengthSq);
+            if ((V(bp, j) - p).LengthSq < match * match) anchorPos[v] = V(bp, j);
+        }
+        var seamVerts = seam.Select(x => x.V).ToHashSet();
+        var along = new Dictionary<int, List<int>>();
+        foreach (var (a, b) in headEdges)
+        {
+            if (!seamVerts.Contains(a) || !seamVerts.Contains(b)) continue;
+            (along.TryGetValue(a, out var la) ? la : along[a] = new()).Add(b);
+            (along.TryGetValue(b, out var lb) ? lb : along[b] = new()).Add(a);
+        }
+        // the same point can be several vertices (UV seams), so walk by position
+        var merges = new Dictionary<int, int>();
+        foreach (var v in seamVerts.Where(v => !anchorPos.ContainsKey(v)))
+        {
+            var dist = new Dictionary<int, float> { [v] = 0 };
+            var queue = new PriorityQueue<int, float>(); queue.Enqueue(v, 0);
+            int? found = null;
+            while (queue.TryDequeue(out var u, out var du))
+            {
+                if (anchorPos.ContainsKey(u)) { found = u; break; }
+                foreach (var w in along.GetValueOrDefault(u) ?? new())
+                {
+                    var dw = du + MathF.Sqrt((V(hp, w) - V(hp, u)).LengthSq);
+                    if (dist.TryGetValue(w, out var old) && old <= dw) continue;
+                    dist[w] = dw; queue.Enqueue(w, dw);
+                }
+            }
+            if (found is { } anchor) merges[v] = anchor;
+        }
 
         var moved = 0; var largest = 0f;
         var seamSet = seam.Select(s => s.V).ToHashSet();
@@ -73,7 +105,9 @@ public static class NeckReshaper
                 q += (target + up * d) * w; weights += w;
             }
             Vec np;
-            if (seamSet.Contains(v)) np = seam.First(s => s.V == v).Target;
+            if (anchorPos.TryGetValue(v, out var exact)) np = exact;
+            else if (merges.TryGetValue(v, out var into)) np = anchorPos[into];
+            else if (seamSet.Contains(v)) np = seam.First(s => s.V == v).Target;
             else if (weights > 0 && nearest < band)
             {
                 var s = nearest / band;
@@ -86,7 +120,7 @@ public static class NeckReshaper
             moved++; largest = MathF.Max(largest, move);
             result[v * 3] = np.X; result[v * 3 + 1] = np.Y; result[v * 3 + 2] = np.Z;
         }
-        return new Result(result, moved, seam.Count, largest);
+        return new Result(result, moved, seam.Count, largest, merges);
     }
 
     private static List<(int A, int B)> BoundaryEdges(ShapeData s)
@@ -129,20 +163,6 @@ public static class NeckReshaper
             result[v] = dir.Normalized();
         }
         return result;
-    }
-
-    private static Vec[] VertexNormals(ShapeData s)
-    {
-        var n = new Vec[s.VertexCount]; var P = s.Positions; var I = s.Indices;
-        for (var t = 0; t + 2 < I.Length; t += 3)
-        {
-            int a = (int)I[t], b = (int)I[t + 1], c = (int)I[t + 2];
-            var e1 = V(P, b) - V(P, a); var e2 = V(P, c) - V(P, a);
-            var f = new Vec(e1.Y * e2.Z - e1.Z * e2.Y, e1.Z * e2.X - e1.X * e2.Z, e1.X * e2.Y - e1.Y * e2.X);
-            n[a] += f; n[b] += f; n[c] += f;
-        }
-        for (var i = 0; i < n.Length; i++) n[i] = n[i].Normalized();
-        return n;
     }
 
     private static Vec V(float[] a, int i) => new(a[i * 3], a[i * 3 + 1], a[i * 3 + 2]);
