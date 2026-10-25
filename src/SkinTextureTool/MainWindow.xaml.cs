@@ -63,6 +63,7 @@ public partial class MainWindow : Window
         Sliders.Settings = state.Settings;
         Regions.Settings = state.Settings;
         Regions.Changed += () => _debounce.Start();
+        NeckFix.Changed += () => _geometryDebounce.Start();
         Painter.Attach(Preview);
         Painter.Settings = state.Settings;
         Painter.MasksSaved += OnMasksSaved;
@@ -171,6 +172,8 @@ public partial class MainWindow : Window
     private async Task RebuildMeshAsync()
     {
         var shapes = SelectedShapes();
+        NeckFix.SetShapes(shapes);
+        shapes = shapes.Select(NeckFix.Apply).ToList();
         if (shapes.Count == 0)
         {
             _meshReady = false;

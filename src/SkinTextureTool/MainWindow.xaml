@@ -108,6 +108,11 @@
                         <local:PaintPanel x:Name="Painter" Margin="6"/>
                     </ScrollViewer>
                 </TabItem>
+                <TabItem Header="Neck seam fix">
+                    <ScrollViewer VerticalScrollBarVisibility="Auto">
+                        <local:NeckFixPanel x:Name="NeckFix" Margin="6"/>
+                    </ScrollViewer>
+                </TabItem>
                 <TabItem Header="Normal sliders">
                     <ScrollViewer VerticalScrollBarVisibility="Auto">
                         <local:SliderPanel x:Name="Sliders" Margin="6"/>
