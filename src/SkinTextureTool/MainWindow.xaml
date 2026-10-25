@@ -1,0 +1,99 @@
+﻿<Window x:Class="SkinTextureTool.MainWindow"
+        xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
+        xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+        xmlns:local="clr-namespace:SkinTextureTool"
+        xmlns:rendering="clr-namespace:SkinTextureTool.Rendering"
+        Title="Skin texture tool" Height="900" Width="1500" MinWidth="1100" MinHeight="640">
+    <DockPanel>
+        <Border DockPanel.Dock="Top" Padding="8" BorderBrush="#33000000" BorderThickness="0,0,0,1">
+            <StackPanel Orientation="Horizontal">
+                <Button Content="Open body NIF…" Padding="12,4" Click="OnOpenNif"/>
+                <Button Content="Load preset…" Padding="10,4" Margin="12,0,0,0" Click="OnLoadPreset"/>
+                <Button Content="Save preset…" Padding="10,4" Margin="6,0,0,0" Click="OnSavePreset"/>
+                <Button Content="Reset to defaults" Padding="10,4" Margin="6,0,0,0" Click="OnResetSettings"/>
+            </StackPanel>
+        </Border>
+
+        <Border DockPanel.Dock="Bottom" Padding="8,4" BorderBrush="#33000000" BorderThickness="0,1,0,0">
+            <TextBlock x:Name="StatusText" TextWrapping="Wrap" Text="Open a BodySlide-built body NIF to begin."/>
+        </Border>
+
+        <Grid>
+            <Grid.ColumnDefinitions>
+                <ColumnDefinition Width="280"/>
+                <ColumnDefinition Width="*"/>
+                <ColumnDefinition Width="400"/>
+            </Grid.ColumnDefinitions>
+
+            <ScrollViewer Grid.Column="0" VerticalScrollBarVisibility="Auto">
+                <StackPanel Margin="8">
+                    <TextBlock Text="Shapes to texture" FontWeight="SemiBold"/>
+                    <TextBlock Text="Shapes sharing one texture should be baked together." TextWrapping="Wrap" Foreground="Gray" Margin="0,2,0,4"/>
+                    <ItemsControl x:Name="ShapeList">
+                        <ItemsControl.ItemTemplate>
+                            <DataTemplate>
+                                <CheckBox IsChecked="{Binding Selected}" Margin="0,2" Checked="OnShapeSelectionChanged" Unchecked="OnShapeSelectionChanged">
+                                    <StackPanel>
+                                        <TextBlock Text="{Binding Name}"/>
+                                        <TextBlock Text="{Binding Detail}" Foreground="Gray" FontSize="11"/>
+                                    </StackPanel>
+                                </CheckBox>
+                            </DataTemplate>
+                        </ItemsControl.ItemTemplate>
+                    </ItemsControl>
+
+                    <TextBlock Text="Preview size" FontWeight="SemiBold" Margin="0,14,0,2"/>
+                    <ComboBox x:Name="PreviewSizeBox" SelectedIndex="1" SelectionChanged="OnPreviewSizeChanged">
+                        <ComboBoxItem Content="1024"/>
+                        <ComboBoxItem Content="2048"/>
+                        <ComboBoxItem Content="4096"/>
+                    </ComboBox>
+
+                    <TextBlock Text="Export" FontWeight="SemiBold" Margin="0,14,0,2"/>
+                    <TextBlock Text="Size"/>
+                    <ComboBox x:Name="ExportSizeBox" SelectedIndex="2">
+                        <ComboBoxItem Content="1024"/>
+                        <ComboBoxItem Content="2048"/>
+                        <ComboBoxItem Content="4096"/>
+                        <ComboBoxItem Content="8192"/>
+                    </ComboBox>
+                    <TextBlock Text="File name (no extension)" Margin="0,6,0,0"/>
+                    <TextBox x:Name="ExportNameBox" Text="femalebody_1"/>
+                    <TextBlock Text="Folder" Margin="0,6,0,0"/>
+                    <DockPanel>
+                        <Button DockPanel.Dock="Right" Content="…" Width="26" Margin="4,0,0,0" Click="OnBrowseExport"/>
+                        <TextBox x:Name="ExportFolderBox"/>
+                    </DockPanel>
+                    <CheckBox x:Name="RfaosBox" IsChecked="True" Margin="0,6,0,0">
+                        <TextBlock TextWrapping="Wrap" Text="Also write name_rfaos.dds (Community Shaders Advanced Skin: roughness, fuzz, AO, specular)"/>
+                    </CheckBox>
+                    <TextBlock TextWrapping="Wrap" Foreground="Gray" Margin="0,4,0,0"
+                               Text="Writes name.dds, name_msn.dds, name_s.dds and name_sk.dds (BC7 with mipmaps)."/>
+                    <Button x:Name="ExportButton" Content="Export textures" Margin="0,8,0,0" Padding="0,6" FontWeight="SemiBold"
+                            Click="OnExport" IsEnabled="False"/>
+                </StackPanel>
+            </ScrollViewer>
+
+            <DockPanel Grid.Column="1" Margin="0,8">
+                <StackPanel DockPanel.Dock="Top" Orientation="Horizontal" Margin="0,0,0,6">
+                    <TextBlock Text="Show:" VerticalAlignment="Center" Margin="0,0,6,0"/>
+                    <ComboBox x:Name="ModeBox" Width="160" SelectedIndex="0" SelectionChanged="OnModeChanged">
+                        <ComboBoxItem Content="Lit"/>
+                        <ComboBoxItem Content="Colour (diffuse)"/>
+                        <ComboBoxItem Content="Normal map (_msn)"/>
+                        <ComboBoxItem Content="Specular (_s)"/>
+                        <ComboBoxItem Content="Subsurface (_sk)"/>
+                        <ComboBoxItem Content="RFAOS (roughness, fuzz, AO)"/>
+                    </ComboBox>
+                </StackPanel>
+                <TextBlock DockPanel.Dock="Bottom" Foreground="Gray" Margin="0,6,0,0"
+                           Text="Drag to rotate, right-drag to move up and down, scroll to zoom."/>
+                <rendering:PreviewView x:Name="Preview"/>
+            </DockPanel>
+
+            <ScrollViewer Grid.Column="2" VerticalScrollBarVisibility="Auto">
+                <local:SettingsPanel x:Name="Settings" Margin="8"/>
+            </ScrollViewer>
+        </Grid>
+    </DockPanel>
+</Window>
