@@ -16,8 +16,10 @@ namespace SkinTextureTool;
 
 public partial class MainWindow : Window
 {
-    private static readonly string StateFolder = Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.ApplicationData), "SkinTextureTool");
+    // Portable: state lives next to the exe. A state file from older builds (in AppData) is read once if there's none yet.
+    private static readonly string StateFolder = AppContext.BaseDirectory;
     private static readonly string StateFile = Path.Combine(StateFolder, "last.json");
+    private static readonly string OldStateFile = Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.ApplicationData), "SkinTextureTool", "last.json");
 
     /// <summary>Loaded NIFs in load order, each with its shapes.</summary>
     private readonly List<(string Path, List<ShapeData> Shapes)> _nifs = new();
@@ -399,7 +401,8 @@ public partial class MainWindow : Window
     {
         try
         {
-            if (File.Exists(StateFile)) return JsonSerializer.Deserialize<State>(File.ReadAllText(StateFile)) ?? new State();
+            var file = File.Exists(StateFile) ? StateFile : OldStateFile;
+            if (File.Exists(file)) return JsonSerializer.Deserialize<State>(File.ReadAllText(file)) ?? new State();
         }
         catch
         {

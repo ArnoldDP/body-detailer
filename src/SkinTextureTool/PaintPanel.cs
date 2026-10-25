@@ -20,7 +20,7 @@ namespace SkinTextureTool;
 public sealed class PaintPanel : StackPanel
 {
     private const int CanvasSize = 1024;
-    private static readonly string MaskFolder = Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.ApplicationData), "SkinTextureTool", "painted masks");
+    private static readonly string MaskFolder = Path.Combine(AppContext.BaseDirectory, "Painted masks"); // portable: next to the exe
 
     private readonly ComboBox _region = new() { DisplayMemberPath = nameof(Region.Name), Margin = new Thickness(0, 2, 0, 0) };
     private readonly Slider _size = new() { Minimum = 0.3, Maximum = 20, Value = 3 };

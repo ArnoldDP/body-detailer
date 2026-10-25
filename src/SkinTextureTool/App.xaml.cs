@@ -28,7 +28,7 @@ public partial class App : Application
     {
         try
         {
-            var folder = Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.ApplicationData), "SkinTextureTool");
+            var folder = AppContext.BaseDirectory; // portable: everything stays next to the exe
             Directory.CreateDirectory(folder);
             File.AppendAllText(Path.Combine(folder, "crash.log"), $"{DateTime.Now:u}\n{ex}\n\n");
         }
