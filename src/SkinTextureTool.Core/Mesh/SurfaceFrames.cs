@@ -19,7 +19,7 @@ public sealed class SurfaceFrames
     /// <param name="weldTolerance">Positions closer than this count as the same point.</param>
     /// <param name="positions">Optional per-shape positions to use instead of the shapes' own (a morphed copy, for slider-driven normals).</param>
     public static List<SurfaceFrames> Build(IReadOnlyList<ShapeData> shapes, float smoothDegree = 60f, bool allowInvertSmooth = false,
-        float weldTolerance = 1e-4f, IReadOnlyList<float[]>? positions = null)
+        float weldTolerance = 1e-4f, IReadOnlyList<float[]>? positions = null, float boundaryTolerance = 5e-3f)
     {
         // Flatten every shape into one vertex/face list so seams between shapes are welded too.
         var offsets = new int[shapes.Count + 1];
@@ -40,7 +40,21 @@ public sealed class SurfaceFrames
                 faces.Add(((int)idx[t] + offsets[s], (int)idx[t + 1] + offsets[s], (int)idx[t + 2] + offsets[s]));
         }
 
-        var welded = Weld(weldPos, vertCount, weldTolerance);
+        // Open-edge vertices (mesh borders, like a head's neck edge meeting the body's) get a second, coarser
+        // weld, as in MuDynamicNormalMap: separate meshes rarely share their seam positions exactly, and an
+        // unwelded seam bakes a hard line into the normal map.
+        var edgeUse = new Dictionary<(int, int), int>();
+        foreach (var (a, b, c) in faces)
+            foreach (var (x, y) in new[] { (a, b), (b, c), (c, a) })
+            {
+                var e = x < y ? (x, y) : (y, x);
+                edgeUse[e] = edgeUse.GetValueOrDefault(e) + 1;
+            }
+        var boundary = new bool[vertCount];
+        foreach (var (e, n) in edgeUse)
+            if (n == 1) { boundary[e.Item1] = true; boundary[e.Item2] = true; }
+
+        var welded = Weld(weldPos, vertCount, weldTolerance, boundary, boundaryTolerance);
         var vertexFaces = new List<int>[vertCount];
         for (var i = 0; i < vertCount; i++) vertexFaces[i] = new List<int>();
         var faceN = new Vec[faces.Count];
@@ -70,8 +84,11 @@ public sealed class SurfaceFrames
         Parallel.For(0, vertCount, i =>
         {
             if (vertexFaces[i].Count == 0) return;
+            // The crease reference is the whole welded group's average, so every vertex at a point (including
+            // both sides of a seam between meshes) keeps the same faces and ends up with the same normal.
             var self = default(Vec);
-            foreach (var f in vertexFaces[i]) self += faceN[f];
+            foreach (var link in welded[i])
+                foreach (var f in vertexFaces[link]) self += faceN[f];
             if (self.LengthSq < 1e-20f) return;
             self = self.Normalized();
 
@@ -121,24 +138,55 @@ public sealed class SurfaceFrames
     /// Groups vertices at the same position. Like MuDynamicNormalMap's "weld accuracy" mode, each vertex is
     /// keyed on two grids offset by half a cell, so points straddling a cell edge still find each other.
     /// </summary>
-    private static List<int>[] Weld(float[] pos, int count, float tolerance)
+    private static List<int>[] Weld(float[] pos, int count, float tolerance, bool[] boundary, float boundaryTolerance)
     {
         var parent = new int[count];
         for (var i = 0; i < count; i++) parent[i] = i;
         int Find(int x) { while (parent[x] != x) x = parent[x] = parent[parent[x]]; return x; }
 
-        foreach (var shift in new[] { 0f, 0.5f })
+        void Pass(float cell, Func<int, bool> include)
         {
-            var cells = new Dictionary<(long, long, long), int>();
-            for (var i = 0; i < count; i++)
+            foreach (var shift in new[] { 0f, 0.5f })
             {
-                var key = ((long)MathF.Floor(pos[i * 3] / tolerance + shift),
-                           (long)MathF.Floor(pos[i * 3 + 1] / tolerance + shift),
-                           (long)MathF.Floor(pos[i * 3 + 2] / tolerance + shift));
-                if (cells.TryGetValue(key, out var other)) parent[Find(i)] = Find(other);
-                else cells[key] = i;
+                var cells = new Dictionary<(long, long, long), int>();
+                for (var i = 0; i < count; i++)
+                {
+                    if (!include(i)) continue;
+                    var key = ((long)MathF.Floor(pos[i * 3] / cell + shift),
+                               (long)MathF.Floor(pos[i * 3 + 1] / cell + shift),
+                               (long)MathF.Floor(pos[i * 3 + 2] / cell + shift));
+                    if (cells.TryGetValue(key, out var other)) parent[Find(i)] = Find(other);
+                    else cells[key] = i;
+                }
             }
         }
+        Pass(tolerance, _ => true);
+
+        // Boundary vertices: an exact radius search over neighbouring cells, so no near pair is missed.
+        var grid = new Dictionary<(long, long, long), List<int>>();
+        (long, long, long) Cell(int i) => ((long)MathF.Floor(pos[i * 3] / boundaryTolerance),
+                                          (long)MathF.Floor(pos[i * 3 + 1] / boundaryTolerance),
+                                          (long)MathF.Floor(pos[i * 3 + 2] / boundaryTolerance));
+        for (var i = 0; i < count; i++)
+        {
+            if (!boundary[i]) continue;
+            var c = Cell(i);
+            if (!grid.TryGetValue(c, out var list)) grid[c] = list = new List<int>();
+            list.Add(i);
+        }
+        var r2 = boundaryTolerance * boundaryTolerance;
+        foreach (var (c, list) in grid)
+            for (var dx = -1; dx <= 1; dx++) for (var dy = -1; dy <= 1; dy++) for (var dz = -1; dz <= 1; dz++)
+            {
+                if (!grid.TryGetValue((c.Item1 + dx, c.Item2 + dy, c.Item3 + dz), out var other)) continue;
+                foreach (var i in list)
+                foreach (var j in other)
+                {
+                    if (j <= i) continue;
+                    float ex = pos[i * 3] - pos[j * 3], ey = pos[i * 3 + 1] - pos[j * 3 + 1], ez = pos[i * 3 + 2] - pos[j * 3 + 2];
+                    if (ex * ex + ey * ey + ez * ez <= r2) parent[Find(i)] = Find(j);
+                }
+            }
 
         var groups = new Dictionary<int, List<int>>();
         var result = new List<int>[count];
