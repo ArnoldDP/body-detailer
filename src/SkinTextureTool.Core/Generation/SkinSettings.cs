@@ -188,9 +188,41 @@ public sealed class SkinSettings
     };
 
     public static SkinSettings LoadPreset(string path) =>
-        JsonSerializer.Deserialize<SkinSettings>(File.ReadAllText(path), Json) ?? new SkinSettings();
+        (JsonSerializer.Deserialize<SkinSettings>(File.ReadAllText(path), Json) ?? new SkinSettings()).WithPaths(ResolvePath);
 
-    public void SavePreset(string path) => File.WriteAllText(path, JsonSerializer.Serialize(this, Json));
+    public void SavePreset(string path) => File.WriteAllText(path, JsonSerializer.Serialize(Clone().WithPaths(PortablePath), Json));
+
+    // Image paths inside the tool's folder are stored relative to it, so the folder (and presets) can move.
+    private static readonly string AppFolder = Path.GetFullPath(AppContext.BaseDirectory);
+
+    /// <summary>A path under the tool's folder made relative to it; anything else is left as it is.</summary>
+    public static string PortablePath(string path)
+    {
+        if (!Path.IsPathFullyQualified(path)) return path;
+        var full = Path.GetFullPath(path);
+        return full.StartsWith(AppFolder, StringComparison.OrdinalIgnoreCase) ? Path.GetRelativePath(AppFolder, full) : path;
+    }
+
+    /// <summary>A relative path resolved against the tool's folder.</summary>
+    public static string ResolvePath(string path) => Path.IsPathFullyQualified(path) ? path : Path.GetFullPath(Path.Combine(AppFolder, path));
+
+    /// <summary>Rewrites every image path (layer masks, detail maps, region masks) with <paramref name="map"/>, in place.</summary>
+    public SkinSettings WithPaths(Func<string, string> map)
+    {
+        static void Map(Dictionary<string, string> paths, Func<string, string> map)
+        {
+            foreach (var key in paths.Keys.ToList()) paths[key] = map(paths[key]);
+        }
+        foreach (var layer in typeof(SkinSettings).GetProperties().Select(p => p.GetValue(this)).OfType<Layer>())
+            Map(layer.MaskPaths, map);
+        Map(Normals.DetailMaps, map);
+        foreach (var region in Regions)
+        {
+            Map(region.MaskPaths, map);
+            region.Settings.WithPaths(map);
+        }
+        return this;
+    }
 
     /// <summary>A copy for a region to start from: these settings without their own regions.</summary>
     public SkinSettings CloneWithoutRegions()

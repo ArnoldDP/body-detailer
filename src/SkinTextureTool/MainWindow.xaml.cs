@@ -402,7 +402,12 @@ public partial class MainWindow : Window
         try
         {
             var file = File.Exists(StateFile) ? StateFile : OldStateFile;
-            if (File.Exists(file)) return JsonSerializer.Deserialize<State>(File.ReadAllText(file)) ?? new State();
+            if (File.Exists(file))
+            {
+                var state = JsonSerializer.Deserialize<State>(File.ReadAllText(file)) ?? new State();
+                state.Settings.WithPaths(SkinSettings.ResolvePath);
+                return state;
+            }
         }
         catch
         {
@@ -418,7 +423,7 @@ public partial class MainWindow : Window
             Directory.CreateDirectory(StateFolder);
             var state = new State
             {
-                Settings = Settings.Settings,
+                Settings = Settings.Settings.Clone().WithPaths(SkinSettings.PortablePath),
                 ExportFolder = string.IsNullOrWhiteSpace(ExportFolderBox.Text) ? null : ExportFolderBox.Text.Trim(),
                 Nifs = _nifs.Select(n => n.Path).ToList(),
                 SliderSets = Sliders.Choices,
