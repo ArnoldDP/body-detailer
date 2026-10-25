@@ -27,13 +27,45 @@ public sealed class PreviewView : ContentControl
     /// <summary>0 lit, 1 albedo, 2 normal map, 3 specular, 4 subsurface.</summary>
     public int Mode { get; set; }
 
+    /// <summary>
+    /// While on, left-drag paints (raising <see cref="Paint"/>) and the brush is drawn under the cursor;
+    /// Alt+left-drag or middle-drag rotates instead.
+    /// </summary>
+    public bool PaintMode { get; set; }
+    public float BrushRadius { get; set; } = 3f;
+    public bool BrushMirror { get; set; }
+    /// <summary>A brush dab: surface point, its normal, and whether it starts a new stroke.</summary>
+    public event Action<Vector3, Vector3, bool>? Paint;
+    public event Action? StrokeEnded;
+    /// <summary>Triangles that can be picked: positions and indices per shape, as drawn.</summary>
+    public IReadOnlyList<(float[] Positions, uint[] Indices)> PickMesh { get; set; } = Array.Empty<(float[], uint[])>();
+
+    private Matrix4 _viewProj;
+    private bool _painting;
+    private Vector3? _lastDab;
+    private Vector4 _brush; // xyz centre, w radius (0 = hidden)
+
     public PreviewView()
     {
         Content = _gl;
         _gl.Start(new GLWpfControlSettings { MajorVersion = 3, MinorVersion = 3, RenderContinuously = false });
         _gl.Render += _ => Draw();
-        _gl.MouseDown += (_, e) => { _lastMouse = e.GetPosition(this); _gl.CaptureMouse(); };
-        _gl.MouseUp += (_, _) => { _lastMouse = null; _gl.ReleaseMouseCapture(); };
+        _gl.MouseDown += (_, e) =>
+        {
+            _lastMouse = e.GetPosition(this);
+            _gl.CaptureMouse();
+            _painting = PaintMode && e.ChangedButton == MouseButton.Left && (Keyboard.Modifiers & ModifierKeys.Alt) == 0;
+            _lastDab = null;
+            if (_painting) PaintAt(_lastMouse.Value, true);
+        };
+        _gl.MouseUp += (_, _) =>
+        {
+            _lastMouse = null;
+            _gl.ReleaseMouseCapture();
+            if (_painting) StrokeEnded?.Invoke();
+            _painting = false;
+        };
+        _gl.MouseLeave += (_, _) => { if (_brush.W != 0) { _brush.W = 0; Refresh(); } };
         _gl.MouseMove += OnMouseMove;
         _gl.MouseWheel += (_, e) => { _distance = Math.Clamp(_distance * (e.Delta > 0 ? 0.9f : 1.1f), 2f, 2000f); Refresh(); };
         _pump.Tick += (_, _) => { if (_work.Count == 0) _pump.Stop(); else _gl.InvalidateVisual(); };
@@ -68,8 +100,15 @@ public sealed class PreviewView : ContentControl
 
     private void OnMouseMove(object sender, MouseEventArgs e)
     {
+        if (PaintMode && !_painting) UpdateBrush(e.GetPosition(this));
         if (_lastMouse is not { } last) return;
         var now = e.GetPosition(this);
+        if (_painting)
+        {
+            _lastMouse = now;
+            PaintAt(now, false);
+            return;
+        }
         var dx = (float)(now.X - last.X);
         var dy = (float)(now.Y - last.Y);
         _lastMouse = now;
@@ -81,6 +120,67 @@ public sealed class PreviewView : ContentControl
             _pitch = Math.Clamp(_pitch + dy * 0.01f, -1.5f, 1.5f);
         }
         Refresh();
+    }
+
+    private void UpdateBrush(Point p)
+    {
+        var hit = Pick(p);
+        _brush = hit is { } h ? new Vector4(h.Position, BrushRadius) : Vector4.Zero;
+        Refresh();
+    }
+
+    /// <summary>Dabs along the path from the last dab, spaced a fraction of the brush apart.</summary>
+    private void PaintAt(Point p, bool first)
+    {
+        var hit = Pick(p);
+        if (hit is not { } h) { UpdateBrush(p); return; }
+        _brush = new Vector4(h.Position, BrushRadius);
+        var spacing = BrushRadius * 0.25f;
+        if (_lastDab is { } last && !first)
+        {
+            var d = (h.Position - last).Length;
+            if (d < spacing) { Refresh(); return; }
+            if (d < BrushRadius * 3)
+                for (var t = spacing; t < d; t += spacing) Paint?.Invoke(Vector3.Lerp(last, h.Position, t / d), h.Normal, false);
+        }
+        Paint?.Invoke(h.Position, h.Normal, first);
+        _lastDab = h.Position;
+        Refresh();
+    }
+
+    /// <summary>The nearest surface point under the cursor, with the face normal turned towards the camera.</summary>
+    public (Vector3 Position, Vector3 Normal)? Pick(Point p)
+    {
+        var w = Math.Max(1, _gl.ActualWidth); var h = Math.Max(1, _gl.ActualHeight);
+        var x = (float)(p.X / w * 2 - 1); var y = (float)(1 - p.Y / h * 2);
+        Matrix4 inv;
+        try { inv = _viewProj.Inverted(); } catch { return null; }
+        var a = new Vector4(x, y, -1, 1) * inv; var b = new Vector4(x, y, 1, 1) * inv;
+        var origin = a.Xyz / a.W; var dir = (b.Xyz / b.W - origin).Normalized();
+        var best = float.MaxValue; Vector3 bestN = default;
+        foreach (var (P, I) in PickMesh)
+            for (var t = 0; t + 2 < I.Length; t += 3)
+            {
+                var v0 = new Vector3(P[I[t] * 3], P[I[t] * 3 + 1], P[I[t] * 3 + 2]);
+                var v1 = new Vector3(P[I[t + 1] * 3], P[I[t + 1] * 3 + 1], P[I[t + 1] * 3 + 2]);
+                var v2 = new Vector3(P[I[t + 2] * 3], P[I[t + 2] * 3 + 1], P[I[t + 2] * 3 + 2]);
+                var e1 = v1 - v0; var e2 = v2 - v0;
+                var pv = Vector3.Cross(dir, e2);
+                var det = Vector3.Dot(e1, pv);
+                if (MathF.Abs(det) < 1e-9f) continue;
+                var invDet = 1 / det;
+                var tv = origin - v0;
+                var u = Vector3.Dot(tv, pv) * invDet; if (u < 0 || u > 1) continue;
+                var qv = Vector3.Cross(tv, e1);
+                var v = Vector3.Dot(dir, qv) * invDet; if (v < 0 || u + v > 1) continue;
+                var dist = Vector3.Dot(e2, qv) * invDet;
+                if (dist <= 0 || dist >= best) continue;
+                best = dist;
+                bestN = Vector3.Cross(e1, e2).Normalized();
+            }
+        if (best == float.MaxValue) return null;
+        if (Vector3.Dot(bestN, dir) > 0) bestN = -bestN;
+        return (origin + dir * best, bestN);
     }
 
     private void Draw()
@@ -100,6 +200,9 @@ public sealed class PreviewView : ContentControl
         var view = Matrix4.LookAt(eye, _target, Vector3.UnitZ);
         var proj = Matrix4.CreatePerspectiveFieldOfView(MathHelper.DegreesToRadians(35), aspect, 0.5f, 10000f);
         var light = Vector3.Normalize(eye - _target + new Vector3(0, 0, _distance * 0.6f) + Vector3.Cross(Vector3.UnitZ, eye - _target) * 0.4f);
-        Renderer.DrawPreview(view * proj, eye, light, Mode);
+        _viewProj = view * proj;
+        var brush = PaintMode ? _brush : Vector4.Zero;
+        var mirror = brush.W > 0 && BrushMirror ? new Vector4(-brush.X, brush.Y, brush.Z, brush.W) : Vector4.Zero;
+        Renderer.DrawPreview(_viewProj, eye, light, Mode, PaintMode, brush, mirror);
     }
 }

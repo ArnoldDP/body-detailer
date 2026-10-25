@@ -358,7 +358,30 @@ internal sealed class SkinRenderer
         p.Set("uPbr", new Vector4(s.Material.Roughness, s.Material.RoughnessVariation, s.Material.Enabled ? s.Material.Fuzz : 0f, s.Material.CavityOcclusion));
     }
 
-    public void DrawPreview(Matrix4 mvp, Vector3 eye, Vector3 light, int mode)
+    private readonly Dictionary<string, (int Texture, int Size)> _paint = new(StringComparer.OrdinalIgnoreCase);
+
+    /// <summary>Uploads a group's paint canvas (8-bit greys) to show over the preview.</summary>
+    public void SetPaint(string group, int size, byte[] values)
+    {
+        if (!_paint.TryGetValue(group, out var p) || p.Size != size)
+        {
+            if (p.Texture != 0) GL.DeleteTexture(p.Texture);
+            p = (GL.GenTexture(), size);
+            GL.BindTexture(TextureTarget.Texture2D, p.Texture);
+            GL.TexImage2D(TextureTarget.Texture2D, 0, PixelInternalFormat.R8, size, size, 0, PixelFormat.Red, PixelType.UnsignedByte, IntPtr.Zero);
+            GL.TexParameter(TextureTarget.Texture2D, TextureParameterName.TextureMinFilter, (int)TextureMinFilter.Linear);
+            GL.TexParameter(TextureTarget.Texture2D, TextureParameterName.TextureMagFilter, (int)TextureMagFilter.Linear);
+            GL.TexParameter(TextureTarget.Texture2D, TextureParameterName.TextureWrapS, (int)TextureWrapMode.ClampToEdge);
+            GL.TexParameter(TextureTarget.Texture2D, TextureParameterName.TextureWrapT, (int)TextureWrapMode.ClampToEdge);
+            _paint[group] = p;
+        }
+        GL.BindTexture(TextureTarget.Texture2D, p.Texture);
+        GL.PixelStore(PixelStoreParameter.UnpackAlignment, 1);
+        GL.TexSubImage2D(TextureTarget.Texture2D, 0, 0, 0, size, size, PixelFormat.Red, PixelType.UnsignedByte, values);
+        GL.PixelStore(PixelStoreParameter.UnpackAlignment, 4);
+    }
+
+    public void DrawPreview(Matrix4 mvp, Vector3 eye, Vector3 light, int mode, bool showPaint, Vector4 brush, Vector4 brushMirror)
     {
         if (_preview == null) return;
         GL.Enable(EnableCap.DepthTest);
@@ -368,6 +391,8 @@ internal sealed class SkinRenderer
         _preview.Set("uEye", eye);
         _preview.Set("uLight", light);
         _preview.Set("uMode", mode);
+        _preview.Set("uBrush", brush);
+        _preview.Set("uBrushMirror", brushMirror);
         foreach (var g in _groups)
         {
             _preview.Set("uReady", g.Ready ? 1 : 0);
@@ -379,6 +404,9 @@ internal sealed class SkinRenderer
                 _preview.Texture("uSss", 3, g.Sss);
                 _preview.Texture("uRfaos", 4, g.Rfaos);
             }
+            var paint = showPaint && _paint.TryGetValue(g.Name, out var p) ? p.Texture : 0;
+            _preview.Texture("uPaint", 5, paint);
+            _preview.Set("uHasPaint", paint != 0 ? 1 : 0);
             DrawShapes(g);
         }
     }

@@ -91,7 +91,7 @@
                 <rendering:PreviewView x:Name="Preview"/>
             </DockPanel>
 
-            <TabControl Grid.Column="2" Margin="0,4,4,4">
+            <TabControl x:Name="Tabs" Grid.Column="2" Margin="0,4,4,4" SelectionChanged="OnTabChanged">
                 <TabItem Header="Skin">
                     <ScrollViewer VerticalScrollBarVisibility="Auto">
                         <local:SettingsPanel x:Name="Settings" Margin="6"/>
@@ -100,6 +100,11 @@
                 <TabItem Header="Regions">
                     <ScrollViewer VerticalScrollBarVisibility="Auto">
                         <local:RegionPanel x:Name="Regions" Margin="6"/>
+                    </ScrollViewer>
+                </TabItem>
+                <TabItem x:Name="PaintTab" Header="Paint masks">
+                    <ScrollViewer VerticalScrollBarVisibility="Auto">
+                        <local:PaintPanel x:Name="Painter" Margin="6"/>
                     </ScrollViewer>
                 </TabItem>
                 <TabItem Header="Normal sliders">

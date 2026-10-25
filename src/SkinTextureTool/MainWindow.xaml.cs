@@ -61,6 +61,11 @@ public partial class MainWindow : Window
         Sliders.Settings = state.Settings;
         Regions.Settings = state.Settings;
         Regions.Changed += () => _debounce.Start();
+        Painter.Attach(Preview);
+        Painter.Settings = state.Settings;
+        Painter.MasksSaved += OnMasksSaved;
+        Painter.RegionsChanged += () => { Regions.Settings = Settings.Settings; _debounce.Start(); };
+        PreviewKeyDown += (_, e) => { if (!(e.OriginalSource is TextBox) && Painter.HandleKey(e)) e.Handled = true; };
         Sliders.Choices = new Dictionary<string, SliderSetChoice>(state.SliderSets, StringComparer.OrdinalIgnoreCase);
         ExportFolderBox.Text = state.ExportFolder ?? "";
         Settings.Changed += () => _debounce.Start();
@@ -146,6 +151,7 @@ public partial class MainWindow : Window
             Settings.Groups = _groups;
             Regions.Groups = _groups;
             await Preview.Run(() => Preview.Renderer.SetMesh(Array.Empty<(string, IReadOnlyList<MeshInput>)>()));
+            Painter.SetMesh(Array.Empty<(string, IReadOnlyList<MeshInput>)>());
             Status(_nifs.Count == 0 ? "Add BodySlide-built NIFs (body, hands, feet, head) to begin." : "Pick at least one shape.");
             return;
         }
@@ -170,6 +176,7 @@ public partial class MainWindow : Window
             .Select(g => (g.Key, (IReadOnlyList<MeshInput>)g.ToList()))
             .ToList();
         await Preview.Run(() => Preview.Renderer.SetMesh(groups));
+        Painter.SetMesh(groups);
         var names = groups.Select(g => g.Key).ToList();
         if (!names.SequenceEqual(_groups))
         {
@@ -256,6 +263,27 @@ public partial class MainWindow : Window
         {
             _generating = false;
         }
+    }
+
+    // ---------- painting ----------
+
+    private void OnTabChanged(object sender, SelectionChangedEventArgs e)
+    {
+        if (e.OriginalSource != Tabs) return;
+        Painter.Active = Tabs.SelectedItem == PaintTab;
+    }
+
+    /// <summary>Painted masks were written: drop the old copies from the GPU so the next generation reads them fresh.</summary>
+    private async void OnMasksSaved(IReadOnlyList<string> paths)
+    {
+        foreach (var path in paths.Distinct(StringComparer.OrdinalIgnoreCase))
+        {
+            _imageTextures.Remove(path);
+            await Preview.Run(() => Preview.Renderer.ForgetImage(path));
+        }
+        Regions.Settings = Settings.Settings;
+        SaveState();
+        Regenerate();
     }
 
     // ---------- export ----------
@@ -362,6 +390,7 @@ public partial class MainWindow : Window
         Settings.Settings = settings;
         Sliders.Settings = settings;
         Regions.Settings = settings;
+        Painter.Settings = settings;
         Sliders.SetNifs(_nifs.Select(n => (n.Path, (IReadOnlyList<ShapeData>)n.Shapes)).ToList());
         _ = RebuildMeshAsync(); // smoothing and sliders may have changed
     }

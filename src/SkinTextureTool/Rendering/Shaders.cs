@@ -333,18 +333,35 @@ internal static class Shaders
         out vec4 frag;
         uniform sampler2D uAlbedo, uNormal, uSpec, uSss, uRfaos;
         uniform int uMode; uniform int uReady; uniform vec3 uLight; uniform vec3 uEye;
-        void main() {
-            if (uReady == 0) { frag = vec4(vec3(0.6) * (0.4 + 0.6 * abs(dot(normalize(vNrm), uLight))), 1.0); return; }
+        uniform sampler2D uPaint; uniform int uHasPaint;
+        uniform vec4 uBrush, uBrushMirror; // centre, radius (0 = hidden)
+        vec3 shade();
+        // the painted mask tinted over the surface, and the brush outline
+        vec3 overlay(vec3 c) {
+            if (uHasPaint == 1) c = mix(c, vec3(1.0, 0.15, 0.1), texture(uPaint, vUv).r * 0.6);
+            for (int i = 0; i < 2; i++) {
+                vec4 b = i == 0 ? uBrush : uBrushMirror;
+                if (b.w <= 0.0) continue;
+                float d = length(vPos - b.xyz) / b.w;
+                float ring = 1.0 - smoothstep(0.0, 0.04, abs(d - 1.0));
+                c = mix(c, vec3(1.0), ring * 0.9);
+                c = mix(c, vec3(1.0), (1.0 - step(1.0, d)) * 0.08);
+            }
+            return c;
+        }
+        void main() { frag = vec4(overlay(shade()), 1.0); }
+        vec3 shade() {
+            if (uReady == 0) return vec3(0.6) * (0.4 + 0.6 * abs(dot(normalize(vNrm), uLight)));
             vec3 albedo = texture(uAlbedo, vUv).rgb;
             vec3 msn = texture(uNormal, vUv).rgb;
             vec3 n = normalize(msn.xzy * 2.0 - 1.0);
             float spec = texture(uSpec, vUv).r;
             vec3 sss = texture(uSss, vUv).rgb;
-            if (uMode == 1) { frag = vec4(albedo, 1.0); return; }
-            if (uMode == 2) { frag = vec4(msn, 1.0); return; }
-            if (uMode == 3) { frag = vec4(vec3(spec), 1.0); return; }
-            if (uMode == 4) { frag = vec4(sss, 1.0); return; }
-            if (uMode == 5) { frag = vec4(texture(uRfaos, vUv).rgb, 1.0); return; }
+            if (uMode == 1) return albedo;
+            if (uMode == 2) return msn;
+            if (uMode == 3) return vec3(spec);
+            if (uMode == 4) return sss;
+            if (uMode == 5) return texture(uRfaos, vUv).rgb;
             vec3 v = normalize(uEye - vPos);
             float ndl = dot(n, uLight);
             float diffuse = max(ndl, 0.0);
@@ -352,7 +369,7 @@ internal static class Shaders
             vec3 hv = normalize(uLight + v);
             float s = pow(max(dot(n, hv), 0.0), 40.0) * spec;
             vec3 colour = albedo * (0.25 + 0.75 * diffuse) + albedo * sss * (wrap - diffuse) * 0.6 + vec3(s);
-            frag = vec4(colour, 1.0);
+            return colour;
         }
         """;
 }
