@@ -12,7 +12,7 @@ public static class NeckReshaper
     public sealed record Result(float[] Positions, int MovedVertices, int SeamVertices, float LargestMove);
 
     /// <param name="band">Height in world units over which the head is bent to continue the body.</param>
-    public static Result Reshape(ShapeData head, ShapeData body, float band = 4f, float reach = 0.75f)
+    public static Result Reshape(ShapeData head, ShapeData body, float band = 4f, float reach = 0.1f)
     {
         var hp = head.Positions; var bp = body.Positions;
         var headEdges = BoundaryEdges(head);
@@ -20,6 +20,7 @@ public static class NeckReshaper
         var bodyEdgeVerts = bodyEdges.SelectMany(e => new[] { e.A, e.B }).Distinct().ToList();
         var bodyTangent = EdgeTangents(body, bodyEdgeVerts);
 
+        var bodyNormal = VertexNormals(body);
         (Vec Target, Vec Up, float Dist) Nearest(Vec p)
         {
             float best = float.MaxValue; Vec target = default, up = default;
@@ -33,6 +34,14 @@ public static class NeckReshaper
                 if (d2 >= best) continue;
                 best = d2; target = q;
                 up = (bodyTangent[a] * (1 - t) + bodyTangent[b] * t).Normalized();
+                // A head vertex landing part-way along a body edge (a T-junction) leaves pixel cracks when drawn;
+                // tucking it a hair under the body's edge lets the head overlap and cover them.
+                var mid = MathF.Min(t, 1 - t) * MathF.Sqrt(len2);
+                if (mid > 0.01f)
+                {
+                    var n = (bodyNormal[a] * (1 - t) + bodyNormal[b] * t).Normalized();
+                    target = target - up * 0.03f - n * 0.015f;
+                }
             }
             return (target, up, MathF.Sqrt(best));
         }
@@ -120,6 +129,20 @@ public static class NeckReshaper
             result[v] = dir.Normalized();
         }
         return result;
+    }
+
+    private static Vec[] VertexNormals(ShapeData s)
+    {
+        var n = new Vec[s.VertexCount]; var P = s.Positions; var I = s.Indices;
+        for (var t = 0; t + 2 < I.Length; t += 3)
+        {
+            int a = (int)I[t], b = (int)I[t + 1], c = (int)I[t + 2];
+            var e1 = V(P, b) - V(P, a); var e2 = V(P, c) - V(P, a);
+            var f = new Vec(e1.Y * e2.Z - e1.Z * e2.Y, e1.Z * e2.X - e1.X * e2.Z, e1.X * e2.Y - e1.Y * e2.X);
+            n[a] += f; n[b] += f; n[c] += f;
+        }
+        for (var i = 0; i < n.Length; i++) n[i] = n[i].Normalized();
+        return n;
     }
 
     private static Vec V(float[] a, int i) => new(a[i * 3], a[i * 3 + 1], a[i * 3 + 2]);

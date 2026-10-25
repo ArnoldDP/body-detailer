@@ -79,7 +79,10 @@ public sealed class NeckFixPanel : StackPanel
         var previous = _head.SelectedItem as ShapeData;
         _shapes = shapes;
         var body = Body;
-        var heads = shapes.Where(s => s != body).OrderByDescending(s => s.Name.Contains("head", StringComparison.OrdinalIgnoreCase)).ToList();
+        // offer heads only when any are loaded; other parts (genitals, hands) aren't what this fixes
+        var named = shapes.Where(s => s != body && (s.Name.Contains("head", StringComparison.OrdinalIgnoreCase)
+                                                    || Path.GetFileName(s.NifPath).Contains("head", StringComparison.OrdinalIgnoreCase))).ToList();
+        var heads = named.Count > 0 ? named : shapes.Where(s => s != body).ToList();
         _updating = true;
         _head.ItemsSource = heads;
         _head.SelectedItem = heads.Contains(previous!) ? previous : heads.FirstOrDefault();

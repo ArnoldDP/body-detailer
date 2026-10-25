@@ -119,11 +119,14 @@ public sealed class SurfaceFrames
             uvScales[i * 2] = tLen / used; uvScales[i * 2 + 1] = bLen / used;
         });
 
+        var tJunctions = shapes.Count > 1 ? FindTJunctions(offsets, edgeUse, boundary, weldPos, welded) : new();
+        PinTJunctions(tJunctions, normals);
         if (conformDistance > 0 && shapes.Count > 1)
             ConformSeams(shapes, offsets, faces, faceN, boundary, pos, welded, normals, conformDistance);
         if (seamRings > 0 && shapes.Count > 1)
             BlendSeams(shapes, offsets, faces, welded, normals, tangents, bitangents, seamRings);
 
+        PinTJunctions(tJunctions, normals);
         var result = new List<SurfaceFrames>();
         for (var s = 0; s < shapes.Count; s++)
         {
@@ -385,6 +388,40 @@ public sealed class SurfaceFrames
             Store(tangents, v, t);
             Store(bitangents, v, Vec.Dot(cross, b) < 0 ? -cross : cross);
         }
+    }
+
+    /// <summary>
+    /// Open-edge vertices of one mesh lying part-way along another mesh's open edge (a high-poly head's extra
+    /// neck vertices between the body's): no vertex to weld to, so their normal is taken from the edge instead.
+    /// </summary>
+    private static List<(int V, int A, int B, float T)> FindTJunctions(int[] offsets, Dictionary<(int, int), int> edgeUse, bool[] boundary, float[] pos, List<int>[] welded)
+    {
+        int ShapeOf(int v) { var s = Array.BinarySearch(offsets, v); return s >= 0 ? s : ~s - 1; }
+        var edges = edgeUse.Where(e => e.Value == 1).Select(e => e.Key).ToList();
+        var result = new List<(int, int, int, float)>();
+        const float tolerance = 0.06f; // covers vertices the neck fix tucks just under the edge
+        for (var v = 0; v < boundary.Length; v++)
+        {
+            if (!boundary[v] || welded[v].Select(ShapeOf).Distinct().Count() > 1) continue;
+            var p = V(pos, v); var shape = ShapeOf(v);
+            float best = tolerance * tolerance; (int, int, float)? hit = null;
+            foreach (var (a, b) in edges)
+            {
+                if (ShapeOf(a) == shape) continue;
+                var pa = V(pos, a); var ab = V(pos, b) - pa; var len2 = ab.LengthSq;
+                if (len2 <= 0) continue;
+                var t = Math.Clamp(Vec.Dot(p - pa, ab) / len2, 0, 1);
+                var d2 = (pa + ab * t - p).LengthSq;
+                if (d2 < best) { best = d2; hit = (a, b, t); }
+            }
+            if (hit is { } h) result.Add((v, h.Item1, h.Item2, h.Item3));
+        }
+        return result;
+    }
+
+    private static void PinTJunctions(List<(int V, int A, int B, float T)> junctions, float[] normals)
+    {
+        foreach (var (v, a, b, t) in junctions) Store(normals, v, (V(normals, a) * (1 - t) + V(normals, b) * t).Normalized());
     }
 
     /// <summary>
