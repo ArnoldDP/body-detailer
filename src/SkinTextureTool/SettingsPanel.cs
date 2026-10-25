@@ -121,6 +121,10 @@ public sealed class SettingsPanel : StackPanel
                 swatch.Background = Brush(c);
                 Raise();
             };
+            // click the swatch for a colour wheel; it writes the hex box, which applies the colour
+            swatch.Cursor = System.Windows.Input.Cursors.Hand;
+            swatch.ToolTip = "Click to pick from a colour wheel";
+            swatch.MouseLeftButtonUp += (_, _) => ColorWheel.Show(swatch, (Rgb)p.GetValue(owner)!, c => box.Text = c.ToHex());
             var right = new StackPanel { Orientation = Orientation.Horizontal };
             right.Children.Add(swatch);
             right.Children.Add(box);
