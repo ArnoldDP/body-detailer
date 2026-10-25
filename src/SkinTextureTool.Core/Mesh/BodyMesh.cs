@@ -39,11 +39,17 @@ public static class BodyMesh
             shape.GetTriangles(tris);
             if (tris.Count == 0) continue;
 
+            // Vertices are stored in the shape's skin space (a vanilla head sits around the origin); this is the
+            // transform that puts them where the game draws them, as Outfit Studio does.
+            var toGlobal = new MatTransform();
+            if (!nif.GetShapeTransformGlobalToSkin(shape, toGlobal)) toGlobal = shape.transform.InverseTransform();
+            toGlobal = toGlobal.InverseTransform();
             var pos = new float[verts.Count * 3];
             var uv = new float[verts.Count * 2];
             for (var i = 0; i < verts.Count; i++)
             {
-                pos[i * 3] = verts[i].x; pos[i * 3 + 1] = verts[i].y; pos[i * 3 + 2] = verts[i].z;
+                var p = toGlobal.ApplyTransform(verts[i]);
+                pos[i * 3] = p.x; pos[i * 3 + 1] = p.y; pos[i * 3 + 2] = p.z;
                 uv[i * 2] = uvs[i].u; uv[i * 2 + 1] = uvs[i].v;
             }
             var idx = new uint[tris.Count * 3];
