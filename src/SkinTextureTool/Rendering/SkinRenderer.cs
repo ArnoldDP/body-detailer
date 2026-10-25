@@ -29,12 +29,17 @@ internal sealed class SkinRenderer
         public List<GpuShape> Shapes { get; } = new();
         public int Size;
         public int Albedo, Height, Spec, Sss, Normal, Rfaos;
-        public int AlbedoB, SpecB, SssB, NormalB, RfaosB;
+        public int AlbedoB, SpecB, SssB, NormalB, RfaosB, HeightB;
+        public int AlbedoT, HeightT, SpecT, SssT, RfaosT; // a region's layers before blending
         public bool Ready;
-        public IEnumerable<int> All => new[] { Albedo, Height, Spec, Sss, Normal, Rfaos, AlbedoB, SpecB, SssB, NormalB, RfaosB };
+        public IEnumerable<int> All => new[]
+        {
+            Albedo, Height, Spec, Sss, Normal, Rfaos, AlbedoB, SpecB, SssB, NormalB, RfaosB, HeightB,
+            AlbedoT, HeightT, SpecT, SssT, RfaosT,
+        };
     }
 
-    private GlProgram? _generate, _bake, _bleed, _preview;
+    private GlProgram? _generate, _bake, _bleed, _preview, _composite;
     private readonly List<Group> _groups = new();
     private int _emptyVao;
     private int _fbo;
@@ -58,6 +63,7 @@ internal sealed class SkinRenderer
         _bake = new GlProgram(Shaders.UvVertex, Shaders.BakeNormals);
         _bleed = new GlProgram(Shaders.ScreenVertex, Shaders.Bleed);
         _preview = new GlProgram(Shaders.PreviewVertex, Shaders.PreviewFragment);
+        _composite = new GlProgram(Shaders.ScreenVertex, Shaders.Composite);
         _emptyVao = GL.GenVertexArray();
         _fbo = GL.GenFramebuffer();
     }
@@ -155,6 +161,12 @@ internal sealed class SkinRenderer
         g.SssB = Target(size, PixelInternalFormat.Rgba8);
         g.NormalB = Target(size, PixelInternalFormat.Rgba8);
         g.RfaosB = Target(size, PixelInternalFormat.Rgba8);
+        g.HeightB = Target(size, PixelInternalFormat.Rgba16f);
+        g.AlbedoT = Target(size, PixelInternalFormat.Rgba8);
+        g.HeightT = Target(size, PixelInternalFormat.Rgba16f);
+        g.SpecT = Target(size, PixelInternalFormat.Rgba8);
+        g.SssT = Target(size, PixelInternalFormat.Rgba8);
+        g.RfaosT = Target(size, PixelInternalFormat.Rgba8);
     }
 
     private static int Target(int size, PixelInternalFormat format)
@@ -217,20 +229,32 @@ internal sealed class SkinRenderer
     {
         EnsureTargets(g, size);
 
-        // 1. skin layers
-        BindTargets(g.Albedo, g.Height, g.Spec, g.Sss, g.Rfaos);
-        GL.ClearColor(0, 0, 0, 0);
-        GL.Clear(ClearBufferMask.ColorBufferBit);
-        _generate!.Use();
-        SetLayerUniforms(_generate, s);
-        var unit = 0;
-        foreach (var (name, layer) in Masks)
+        // 1. skin layers, then each region's layers blended over them through its mask
+        RenderLayers(g, s, images, g.Albedo, g.Height, g.Spec, g.Sss, g.Rfaos);
+        foreach (var region in s.Regions.Where(r => r.Enabled && r.Strength > 0))
         {
-            var tex = Image(images, layer(s).MaskFor(g.Name));
-            _generate.Texture("m" + name, unit++, tex);
-            _generate.Set("h" + name, tex != 0 ? 1 : 0);
+            var mask = Image(images, region.MaskFor(g.Name));
+            if (mask == 0) continue;
+            RenderLayers(g, region.Settings, images, g.AlbedoT, g.HeightT, g.SpecT, g.SssT, g.RfaosT);
+            BindTargets(g.AlbedoB, g.HeightB, g.SpecB, g.SssB, g.RfaosB);
+            _composite!.Use();
+            int[] baseSet = { g.Albedo, g.Height, g.Spec, g.Sss, g.Rfaos }, regionSet = { g.AlbedoT, g.HeightT, g.SpecT, g.SssT, g.RfaosT };
+            for (var t = 0; t < 5; t++)
+            {
+                _composite.Texture("b" + t, t, baseSet[t]);
+                _composite.Texture("r" + t, 5 + t, regionSet[t]);
+            }
+            _composite.Texture("uMask", 10, mask);
+            _composite.Set("uStrength", region.Strength);
+            GL.BindVertexArray(_emptyVao);
+            GL.DrawArrays(PrimitiveType.Triangles, 0, 3);
+            GL.BindVertexArray(0);
+            (g.Albedo, g.AlbedoB) = (g.AlbedoB, g.Albedo);
+            (g.Height, g.HeightB) = (g.HeightB, g.Height);
+            (g.Spec, g.SpecB) = (g.SpecB, g.Spec);
+            (g.Sss, g.SssB) = (g.SssB, g.Sss);
+            (g.Rfaos, g.RfaosB) = (g.RfaosB, g.Rfaos);
         }
-        DrawShapes(g);
 
         // 2. model-space normal bake
         BindTargets(g.Normal);
@@ -269,6 +293,24 @@ internal sealed class SkinRenderer
             GL.TexParameter(TextureTarget.Texture2D, TextureParameterName.TextureMinFilter, (int)TextureMinFilter.LinearMipmapLinear);
         }
         g.Ready = true;
+    }
+
+    /// <summary>Runs the skin layers with <paramref name="s"/> (and its layer masks) into the given targets.</summary>
+    private void RenderLayers(Group g, SkinSettings s, IReadOnlyDictionary<string, int> images, params int[] targets)
+    {
+        BindTargets(targets);
+        GL.ClearColor(0, 0, 0, 0);
+        GL.Clear(ClearBufferMask.ColorBufferBit);
+        _generate!.Use();
+        SetLayerUniforms(_generate, s);
+        var unit = 0;
+        foreach (var (name, layer) in Masks)
+        {
+            var tex = Image(images, layer(s).MaskFor(g.Name));
+            _generate.Texture("m" + name, unit++, tex);
+            _generate.Set("h" + name, tex != 0 ? 1 : 0);
+        }
+        DrawShapes(g);
     }
 
     private static Vector3 C(Rgb c) => new(c.R, c.G, c.B);

@@ -97,6 +97,11 @@
                         <local:SettingsPanel x:Name="Settings" Margin="6"/>
                     </ScrollViewer>
                 </TabItem>
+                <TabItem Header="Regions">
+                    <ScrollViewer VerticalScrollBarVisibility="Auto">
+                        <local:RegionPanel x:Name="Regions" Margin="6"/>
+                    </ScrollViewer>
+                </TabItem>
                 <TabItem Header="Normal sliders">
                     <ScrollViewer VerticalScrollBarVisibility="Auto">
                         <local:SliderPanel x:Name="Sliders" Margin="6"/>

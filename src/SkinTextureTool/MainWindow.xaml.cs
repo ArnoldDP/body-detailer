@@ -59,6 +59,8 @@ public partial class MainWindow : Window
         var state = LoadState();
         Settings.Settings = state.Settings;
         Sliders.Settings = state.Settings;
+        Regions.Settings = state.Settings;
+        Regions.Changed += () => _debounce.Start();
         Sliders.Choices = new Dictionary<string, SliderSetChoice>(state.SliderSets, StringComparer.OrdinalIgnoreCase);
         ExportFolderBox.Text = state.ExportFolder ?? "";
         Settings.Changed += () => _debounce.Start();
@@ -142,6 +144,7 @@ public partial class MainWindow : Window
             ExportButton.IsEnabled = false;
             _groups = Array.Empty<string>();
             Settings.Groups = _groups;
+            Regions.Groups = _groups;
             await Preview.Run(() => Preview.Renderer.SetMesh(Array.Empty<(string, IReadOnlyList<MeshInput>)>()));
             Status(_nifs.Count == 0 ? "Add BodySlide-built NIFs (body, hands, feet, head) to begin." : "Pick at least one shape.");
             return;
@@ -170,6 +173,7 @@ public partial class MainWindow : Window
         {
             _groups = names;
             Settings.Groups = names;
+            Regions.Groups = names;
         }
         _meshReady = true;
         ExportButton.IsEnabled = true;
@@ -199,6 +203,11 @@ public partial class MainWindow : Window
         foreach (var layer in typeof(SkinSettings).GetProperties().Select(p => p.GetValue(s)).OfType<Layer>())
             foreach (var path in layer.MaskPaths.Values) yield return path;
         foreach (var path in s.Normals.DetailMaps.Values) yield return path;
+        foreach (var region in s.Regions)
+        {
+            foreach (var path in region.MaskPaths.Values) yield return path;
+            foreach (var path in ImagePaths(region.Settings)) yield return path;
+        }
     }
 
     /// <summary>Loads any images not on the GPU yet; images that fail to load are skipped with a message.</summary>
@@ -350,6 +359,7 @@ public partial class MainWindow : Window
     {
         Settings.Settings = settings;
         Sliders.Settings = settings;
+        Regions.Settings = settings;
         Sliders.SetNifs(_nifs.Select(n => (n.Path, (IReadOnlyList<ShapeData>)n.Shapes)).ToList());
         _ = RebuildMeshAsync(); // smoothing and sliders may have changed
     }

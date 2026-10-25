@@ -281,6 +281,29 @@ internal static class Shaders
         }
         """;
 
+    /// <summary>
+    /// Blends a region's layers over the base: each output mixes towards the region's value by
+    /// mask × strength, keeping the base's coverage in alpha (RFAOS alpha is specular, so it blends too).
+    /// </summary>
+    public const string Composite = """
+        #version 330 core
+        in vec2 vUv;
+        layout(location=0) out vec4 o0; layout(location=1) out vec4 o1; layout(location=2) out vec4 o2;
+        layout(location=3) out vec4 o3; layout(location=4) out vec4 o4;
+        uniform sampler2D b0, b1, b2, b3, b4, r0, r1, r2, r3, r4, uMask;
+        uniform float uStrength;
+        void main() {
+            ivec2 c = ivec2(gl_FragCoord.xy);
+            vec4 base0 = texelFetch(b0, c, 0);
+            float w = clamp(texture(uMask, vUv).r * uStrength, 0.0, 1.0) * texelFetch(r0, c, 0).a;
+            o0 = vec4(mix(base0.rgb, texelFetch(r0, c, 0).rgb, w), base0.a);
+            vec4 h = texelFetch(b1, c, 0); o1 = vec4(mix(h.r, texelFetch(r1, c, 0).r, w), 0.0, 0.0, h.a);
+            vec4 sp = texelFetch(b2, c, 0); o2 = vec4(mix(sp.rgb, texelFetch(r2, c, 0).rgb, w), sp.a);
+            vec4 ss = texelFetch(b3, c, 0); o3 = vec4(mix(ss.rgb, texelFetch(r3, c, 0).rgb, w), ss.a);
+            o4 = mix(texelFetch(b4, c, 0), texelFetch(r4, c, 0), w);
+        }
+        """;
+
     public const string PreviewVertex = """
         #version 330 core
         layout(location=0) in vec3 aPos;

@@ -124,6 +124,22 @@ public sealed class NormalLayer : Layer
     public bool TangentZCorrection { get; set; } = true;
 }
 
+/// <summary>
+/// A masked area with its own skin settings, blended over the base skin (face, palms, knees…). Masks are per
+/// texture group like layer masks; where no mask is set for a group, the region doesn't touch that group.
+/// </summary>
+public sealed class Region
+{
+    public string Name { get; set; } = "Region";
+    public bool Enabled { get; set; } = true;
+    [Range(0, 1)] public float Strength { get; set; } = 1f;
+    public Dictionary<string, string> MaskPaths { get; set; } = new(StringComparer.OrdinalIgnoreCase);
+    /// <summary>The region's own settings; its Regions list is unused.</summary>
+    public SkinSettings Settings { get; set; } = new();
+
+    public string? MaskFor(string group) => MaskPaths.TryGetValue(group, out var p) ? p : null;
+}
+
 public sealed class SkinSettings
 {
     [Range(512, 8192)] public int Resolution { get; set; } = 2048;
@@ -155,6 +171,9 @@ public sealed class SkinSettings
     /// </summary>
     public Dictionary<string, Dictionary<string, float>> NormalSliders { get; set; } = new(StringComparer.OrdinalIgnoreCase);
 
+    /// <summary>Masked areas with their own settings, applied in order over the base skin.</summary>
+    public List<Region> Regions { get; set; } = new();
+
     private static readonly JsonSerializerOptions Json = new()
     {
         WriteIndented = true,
@@ -165,6 +184,15 @@ public sealed class SkinSettings
         JsonSerializer.Deserialize<SkinSettings>(File.ReadAllText(path), Json) ?? new SkinSettings();
 
     public void SavePreset(string path) => File.WriteAllText(path, JsonSerializer.Serialize(this, Json));
+
+    /// <summary>A copy for a region to start from: these settings without their own regions.</summary>
+    public SkinSettings CloneWithoutRegions()
+    {
+        var copy = Clone();
+        copy.Regions.Clear();
+        copy.NormalSliders.Clear();
+        return copy;
+    }
 
     public SkinSettings Clone() => JsonSerializer.Deserialize<SkinSettings>(JsonSerializer.Serialize(this, Json), Json)!;
 }
