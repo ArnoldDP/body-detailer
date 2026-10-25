@@ -3,7 +3,8 @@
         xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
         xmlns:local="clr-namespace:SkinTextureTool"
         xmlns:rendering="clr-namespace:SkinTextureTool.Rendering"
-        Title="Skin texture tool" Height="900" Width="1500" MinWidth="1100" MinHeight="640">
+        Title="Skin texture tool" Height="900" Width="1500" MinWidth="1100" MinHeight="640"
+        AllowDrop="True" DragOver="OnDragOver" Drop="OnDrop">
     <DockPanel>
         <Border DockPanel.Dock="Top" Padding="8" BorderBrush="#33000000" BorderThickness="0,0,0,1">
             <StackPanel Orientation="Horizontal">

@@ -90,6 +90,32 @@ public partial class MainWindow : Window
         if (dlg.ShowDialog(this) == true) await AddNifsAsync(dlg.FileNames);
     }
 
+    /// <summary>NIFs, folders of NIFs, or a preset dropped anywhere on the window.</summary>
+    private static List<string> DroppedNifs(DragEventArgs e) =>
+        e.Data.GetData(DataFormats.FileDrop) is not string[] items ? new()
+            : items.SelectMany(p => Directory.Exists(p) ? Directory.EnumerateFiles(p, "*.nif") : new[] { p })
+                .Where(p => p.EndsWith(".nif", StringComparison.OrdinalIgnoreCase)).ToList();
+
+    private static string? DroppedPreset(DragEventArgs e) =>
+        e.Data.GetData(DataFormats.FileDrop) is string[] items ? items.FirstOrDefault(p => p.EndsWith(".json", StringComparison.OrdinalIgnoreCase)) : null;
+
+    private void OnDragOver(object sender, DragEventArgs e)
+    {
+        e.Effects = DroppedNifs(e).Count > 0 || DroppedPreset(e) != null ? DragDropEffects.Copy : DragDropEffects.None;
+        e.Handled = true;
+    }
+
+    private async void OnDrop(object sender, DragEventArgs e)
+    {
+        var nifs = DroppedNifs(e);
+        if (nifs.Count > 0) await AddNifsAsync(nifs);
+        if (DroppedPreset(e) is { } preset)
+        {
+            try { ApplySettings(SkinSettings.LoadPreset(preset)); Status("Loaded preset " + Path.GetFileName(preset)); }
+            catch (Exception ex) { Status("Couldn't read that preset: " + ex.Message); }
+        }
+    }
+
     private async void OnClearNifs(object sender, RoutedEventArgs e)
     {
         _nifs.Clear();
