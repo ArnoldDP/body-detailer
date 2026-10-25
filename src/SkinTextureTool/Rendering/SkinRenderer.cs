@@ -27,6 +27,8 @@ internal sealed class SkinRenderer
     {
         public required string Name { get; init; }
         public List<GpuShape> Shapes { get; } = new();
+        /// <summary>Typical world units per unit of UV across the group's surface.</summary>
+        public float WorldPerUv;
         public int Size;
         public int Albedo, Height, Spec, Sss, Normal, Rfaos;
         public int AlbedoB, SpecB, SssB, NormalB, RfaosB, HeightB;
@@ -42,6 +44,7 @@ internal sealed class SkinRenderer
     private GlProgram? _generate, _bake, _bleed, _preview, _composite;
     private readonly List<Group> _groups = new();
     private int _emptyVao;
+    private float _footprint = 0.05f;
     private int _fbo;
     private readonly Dictionary<string, int> _images = new(StringComparer.OrdinalIgnoreCase);
 
@@ -83,8 +86,11 @@ internal sealed class SkinRenderer
         foreach (var (name, shapes) in groups)
         {
             var group = new Group { Name = name };
+            var scales = new List<float>();
             foreach (var (s, f) in shapes)
             {
+                for (var v = 0; v + 1 < f.UvScales.Length; v += 2)
+                    if (f.UvScales[v] > 0) scales.Add(MathF.Max(f.UvScales[v], f.UvScales[v + 1]));
                 var vao = GL.GenVertexArray();
                 GL.BindVertexArray(vao);
                 var buffers = new int[7];
@@ -107,6 +113,8 @@ internal sealed class SkinRenderer
                     max = Vector3.ComponentMax(max, p);
                 }
             }
+            scales.Sort();
+            group.WorldPerUv = scales.Count > 0 ? scales[scales.Count / 2] : 100f;
             _groups.Add(group);
         }
         if (_groups.Count > 0)
@@ -215,6 +223,8 @@ internal sealed class SkinRenderer
         GL.Disable(EnableCap.Blend);
         GL.Viewport(0, 0, size, size);
 
+        // every group band-limits its detail to the coarsest group's texel size at this resolution
+        _footprint = _groups.Count > 0 ? _groups.Max(g => g.WorldPerUv) / size : 0.05f;
         foreach (var g in _groups.Where(g => only == null || g.Name == only))
             GenerateGroup(g, s, size, images);
 
@@ -303,6 +313,7 @@ internal sealed class SkinRenderer
         GL.Clear(ClearBufferMask.ColorBufferBit);
         _generate!.Use();
         SetLayerUniforms(_generate, s);
+        _generate.Set("uFootprint", _footprint);
         var unit = 0;
         foreach (var (name, layer) in Masks)
         {

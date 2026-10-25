@@ -82,6 +82,9 @@ internal static class Shaders
         layout(location=4) out vec4 oRfaos;
 
         uniform float uScale; uniform int uUseUv;
+        // World units per texel of the coarsest texture group. Fine detail is band-limited to it, so meshes
+        // with very different texel densities (a high-poly head next to the body) draw identical detail.
+        uniform float uFootprint;
         uniform vec3 uBaseColor; uniform float uMottling, uMottlingScale;
         // zones: x strength, y scale, z enabled
         uniform vec3 uRedColor, uYellowColor, uBlueColor; uniform vec3 uRed, uYellow, uBlue;
@@ -101,11 +104,18 @@ internal static class Shaders
         uniform int hRed, hYellow, hBlue, hLips, hPores, hFreck, hMole, hPimple, hBlem, hRedSpot, hVeins;
         float mask(sampler2D s, int has) { return has == 1 ? texture(s, vUv).r : 1.0; }
 
-        // A sparse spot field: cells at this scale hold a spot with probability 'amount', of radius 'radius'.
-        float spots(vec3 p, float amount, float radius, float seedShift) {
-            vec3 v = voronoi(p + seedShift);
+        // How many texels (at the shared footprint) one noise cell of this frequency spans.
+        float cellTexels(float freq) { return 1.0 / max(freq * uScale * uFootprint, 1e-6); }
+        // Fades detail whose cells are too small to draw cleanly at the shared footprint.
+        float detailFade(float freq) { return smoothstep(2.0, 6.0, cellTexels(freq)); }
+
+        // A sparse spot field: cells at this frequency hold a spot with probability 'amount', of radius 'radius'
+        // (in cell units). Edges are softened to at least a texel of the shared footprint.
+        float spots(vec3 p, float freq, float amount, float radius, float seedShift) {
+            vec3 v = voronoi(p * freq + seedShift);
             if (v.z > amount) return 0.0;
-            return smoothstep(radius, radius * 0.35, v.x);
+            float w = 1.2 / cellTexels(freq);
+            return smoothstep(radius + w * 0.5, max(radius * 0.35 - w * 0.5, 0.0), v.x);
         }
 
         void main() {
@@ -134,13 +144,13 @@ internal static class Shaders
             }
             // red spots: small irritated patches
             if (uRedSpot.x > 0.0) {
-                float r = spots(p * 0.35 * uRedSpot.y, uRedSpot.x, 0.45, 53.0);
+                float r = spots(p, 0.35 * uRedSpot.y, uRedSpot.x, 0.45, 53.0);
                 col = mix(col, uRedSpotColor, uRedSpot.z * r * mask(mRedSpot, hRedSpot));
             }
             // freckles: clustered where a slow noise allows them
             if (uFreck.x > 0.0) {
                 float cluster = smoothstep(-0.2, 0.5, fbm(p * 0.05 * uFreck.y + 61.0, 3));
-                float f = spots(p * 1.1 * uFreck.y, uFreck.x * cluster, 0.42, 67.0);
+                float f = spots(p, 1.1 * uFreck.y, uFreck.x * cluster, 0.42, 67.0);
                 col = mix(col, uFreckColor, uFreck.z * f * mask(mFreck, hFreck));
             }
             // veins: thin ridges of a low-frequency noise
@@ -151,13 +161,13 @@ internal static class Shaders
             }
             // moles: rare dark spots, slightly raised
             if (uMole.x > 0.0) {
-                float mo = spots(p * 0.12 * uMole.y, uMole.x * 0.25, 0.1, 83.0) * mask(mMole, hMole);
+                float mo = spots(p, 0.12 * uMole.y, uMole.x * 0.25, 0.1, 83.0) * mask(mMole, hMole);
                 col = mix(col, uMoleColor, uMole.z * mo);
                 height += mo * uMole.w * 0.06;
             }
             // pimples: small reddish bumps
             if (uPimple.x > 0.0) {
-                float pi = spots(p * 0.3 * uPimple.y, uPimple.x * 0.4, 0.3, 97.0) * mask(mPimple, hPimple);
+                float pi = spots(p, 0.3 * uPimple.y, uPimple.x * 0.4, 0.3, 97.0) * mask(mPimple, hPimple);
                 col = mix(col, uPimpleColor, uPimple.z * pi);
                 height += pi * uPimple.w * 0.05;
             }
@@ -165,8 +175,9 @@ internal static class Shaders
             if (uPores.x > 0.0) {
                 float density = smoothstep(-0.5, 0.6, fbm(p * 0.07 + 101.0, 3));
                 vec3 v = voronoi(p * 4.5 * uPores.z + 107.0);
-                float pore = (v.z < 0.35 + 0.6 * density ? 1.0 : 0.0) * smoothstep(0.22 * uPores.y, 0.04, v.x);
-                pore *= mask(mPores, hPores);
+                float pw = 1.2 / cellTexels(4.5 * uPores.z);
+                float pore = (v.z < 0.35 + 0.6 * density ? 1.0 : 0.0) * smoothstep(0.22 * uPores.y + pw * 0.5, max(0.04 - pw * 0.5, 0.0), v.x);
+                pore *= mask(mPores, hPores) * detailFade(4.5 * uPores.z);
                 poreAmount = pore;
                 cavity = max(cavity, pore * uPores.x);
                 height -= pore * uPores.x * 0.012;
@@ -175,14 +186,15 @@ internal static class Shaders
             // skin cells: a fine network of shallow creases
             if (uCells.z > 0.5 && uCells.x > 0.0) {
                 vec3 v = voronoi(p * 1.6 * uCells.y + 113.0);
-                float crease = smoothstep(0.12, 0.0, v.y - v.x);
+                float cw = 1.2 / cellTexels(1.6 * uCells.y);
+                float crease = smoothstep(0.12 + cw, 0.0, v.y - v.x) * detailFade(1.6 * uCells.y);
                 height -= crease * uCells.x * 0.006;
                 cavity = max(cavity, crease * uCells.x * 0.5);
             }
             // goosebumps: small raised dots
             if (uGoose.z > 0.5 && uGoose.x > 0.0) {
                 vec3 v = voronoi(p * 2.5 * uGoose.y + 127.0);
-                height += (v.z < 0.6 ? 1.0 : 0.0) * smoothstep(0.38, 0.0, v.x) * uGoose.x * 0.01;
+                height += (v.z < 0.6 ? 1.0 : 0.0) * smoothstep(0.38, 0.0, v.x) * uGoose.x * 0.01 * detailFade(2.5 * uGoose.y);
             }
 
             float spec = uMaterial.x * (1.0 - uMaterial.y * (0.5 + 0.5 * fbm(p * 0.2 + 131.0, 3)));
