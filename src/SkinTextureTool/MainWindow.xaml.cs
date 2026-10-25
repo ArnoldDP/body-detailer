@@ -48,6 +48,7 @@ public partial class MainWindow : Window
         public string? ExportFolder { get; set; }
         public List<string> Nifs { get; set; } = new();
         public Dictionary<string, SliderSetChoice> SliderSets { get; set; } = new(StringComparer.OrdinalIgnoreCase);
+        public string? Mo2Folder { get; set; }
     }
 
     public MainWindow()
@@ -71,6 +72,7 @@ public partial class MainWindow : Window
         PreviewKeyDown += (_, e) => { if (!(e.OriginalSource is TextBox) && Painter.HandleKey(e)) e.Handled = true; };
         Sliders.Choices = new Dictionary<string, SliderSetChoice>(state.SliderSets, StringComparer.OrdinalIgnoreCase);
         ExportFolderBox.Text = state.ExportFolder ?? "";
+        if (string.IsNullOrEmpty(Patcher.Mo2Folder) && state.Mo2Folder != null) Patcher.Mo2Folder = state.Mo2Folder;
         Settings.Changed += () => _debounce.Start();
         Settings.GeometryChanged += () => _geometryDebounce.Start();
         Sliders.Changed += () => _geometryDebounce.Start();
@@ -460,6 +462,7 @@ public partial class MainWindow : Window
                 ExportFolder = string.IsNullOrWhiteSpace(ExportFolderBox.Text) ? null : ExportFolderBox.Text.Trim(),
                 Nifs = _nifs.Select(n => n.Path).ToList(),
                 SliderSets = Sliders.Choices,
+                Mo2Folder = string.IsNullOrWhiteSpace(Patcher.Mo2Folder) ? null : Patcher.Mo2Folder,
             };
             File.WriteAllText(StateFile, JsonSerializer.Serialize(state, new JsonSerializerOptions { WriteIndented = true }));
         }

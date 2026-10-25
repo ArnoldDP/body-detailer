@@ -113,6 +113,9 @@
                         <local:NeckFixPanel x:Name="NeckFix" Margin="6"/>
                     </ScrollViewer>
                 </TabItem>
+                <TabItem Header="Load order patcher">
+                    <local:PatcherPanel x:Name="Patcher" Margin="6"/>
+                </TabItem>
                 <TabItem Header="Normal sliders">
                     <ScrollViewer VerticalScrollBarVisibility="Auto">
                         <local:SliderPanel x:Name="Sliders" Margin="6"/>
