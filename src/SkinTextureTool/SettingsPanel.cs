@@ -96,7 +96,7 @@ public sealed class SettingsPanel : StackPanel
                 var v = isInt ? Math.Round(e.NewValue) : e.NewValue;
                 p.SetValue(owner, isInt ? (object)(int)v : (float)v);
                 text.Text = Format(v, isInt);
-                if (owner is NormalLayer && p.Name == nameof(NormalLayer.SmoothDegree)) RaiseGeometry();
+                if (owner is NormalLayer && p.Name is nameof(NormalLayer.SmoothDegree) or nameof(NormalLayer.SeamBlend)) RaiseGeometry();
                 else Raise();
             };
             panel.Children.Add(Row(label, slider, text));

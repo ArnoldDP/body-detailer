@@ -117,6 +117,8 @@ public sealed class NormalLayer : Layer
 {
     [Range(0, 3)] public float DetailStrength { get; set; } = 1f;
     [Range(0, 180)] public float SmoothDegree { get; set; } = 60f;
+    /// <summary>Rings of vertices either side of a seam between meshes over which normals are blended.</summary>
+    [Range(0, 20)] public int SeamBlend { get; set; } = 6;
     /// <summary>Optional tangent-space detail normal maps blended in, as in MuDynamicNormalMap, one per texture group.</summary>
     public Dictionary<string, string> DetailMaps { get; set; } = new(StringComparer.OrdinalIgnoreCase);
     public string? DetailMapFor(string group) => DetailMaps.TryGetValue(group, out var p) ? p : null;

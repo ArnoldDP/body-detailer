@@ -19,7 +19,7 @@ public sealed class SurfaceFrames
     /// <param name="weldTolerance">Positions closer than this count as the same point.</param>
     /// <param name="positions">Optional per-shape positions to use instead of the shapes' own (a morphed copy, for slider-driven normals).</param>
     public static List<SurfaceFrames> Build(IReadOnlyList<ShapeData> shapes, float smoothDegree = 60f, bool allowInvertSmooth = false,
-        float weldTolerance = 1e-4f, IReadOnlyList<float[]>? positions = null, float boundaryTolerance = 5e-3f)
+        float weldTolerance = 1e-4f, IReadOnlyList<float[]>? positions = null, float boundaryTolerance = 5e-3f, int seamRings = 6)
     {
         // Flatten every shape into one vertex/face list so seams between shapes are welded too.
         var offsets = new int[shapes.Count + 1];
@@ -119,6 +119,9 @@ public sealed class SurfaceFrames
             uvScales[i * 2] = tLen / used; uvScales[i * 2 + 1] = bLen / used;
         });
 
+        if (seamRings > 0 && shapes.Count > 1)
+            BlendSeams(shapes, offsets, faces, welded, normals, tangents, bitangents, seamRings);
+
         var result = new List<SurfaceFrames>();
         for (var s = 0; s < shapes.Count; s++)
         {
@@ -132,6 +135,97 @@ public sealed class SurfaceFrames
             });
         }
         return result;
+    }
+
+    /// <summary>
+    /// Where two meshes meet (a head's neck edge on the body), each side usually bends differently right at the
+    /// border, and with only one shared row of vertices the whole change of direction lands in one thin strip
+    /// of triangles: a hard line in the normal map even though both sides agree at the seam. This spreads the
+    /// change over <paramref name="rings"/> rings of vertices either side, fading out with distance.
+    /// </summary>
+    private static void BlendSeams(IReadOnlyList<ShapeData> shapes, int[] offsets, List<(int A, int B, int C)> faces, List<int>[] welded,
+        float[] normals, float[] tangents, float[] bitangents, int rings)
+    {
+        var count = normals.Length / 3;
+        var shapeOf = new int[count];
+        for (var s = 0; s < shapes.Count; s++)
+            for (var v = offsets[s]; v < offsets[s + 1]; v++) shapeOf[v] = s;
+
+        var neighbours = new HashSet<int>[count];
+        for (var i = 0; i < count; i++) neighbours[i] = new HashSet<int>();
+        foreach (var (a, b, c) in faces)
+        {
+            neighbours[a].Add(b); neighbours[a].Add(c);
+            neighbours[b].Add(a); neighbours[b].Add(c);
+            neighbours[c].Add(a); neighbours[c].Add(b);
+        }
+
+        // distance in rings from the nearest vertex whose welded group spans more than one mesh
+        var dist = Enumerable.Repeat(int.MaxValue, count).ToArray();
+        var queue = new Queue<int>();
+        for (var i = 0; i < count; i++)
+        {
+            if (welded[i].Select(v => shapeOf[v]).Distinct().Count() < 2) continue;
+            dist[i] = 0;
+            queue.Enqueue(i);
+        }
+        if (queue.Count == 0) return;
+        while (queue.Count > 0)
+        {
+            var v = queue.Dequeue();
+            if (dist[v] >= rings) continue;
+            foreach (var u in neighbours[v].Concat(welded[v]))
+            {
+                var d = welded[v].Contains(u) ? dist[v] : dist[v] + 1;
+                if (d < dist[u]) { dist[u] = d; queue.Enqueue(u); }
+            }
+        }
+
+        var band = Enumerable.Range(0, count).Where(i => dist[i] <= rings).ToArray();
+        for (var iteration = 0; iteration < rings * 2; iteration++)
+        {
+            var next = (float[])normals.Clone();
+            foreach (var v in band)
+            {
+                float sx = 0, sy = 0, sz = 0;
+                foreach (var u in neighbours[v].Concat(welded[v]))
+                {
+                    sx += normals[u * 3]; sy += normals[u * 3 + 1]; sz += normals[u * 3 + 2];
+                }
+                var l = MathF.Sqrt(sx * sx + sy * sy + sz * sz);
+                if (l <= 0) continue;
+                var w = 1f - dist[v] / (float)(rings + 1); // full blending at the seam, none at the band's edge
+                var nx = normals[v * 3] + (sx / l - normals[v * 3]) * w;
+                var ny = normals[v * 3 + 1] + (sy / l - normals[v * 3 + 1]) * w;
+                var nz = normals[v * 3 + 2] + (sz / l - normals[v * 3 + 2]) * w;
+                var nl = MathF.Sqrt(nx * nx + ny * ny + nz * nz);
+                if (nl > 0) { next[v * 3] = nx / nl; next[v * 3 + 1] = ny / nl; next[v * 3 + 2] = nz / nl; }
+            }
+            // welded copies stay identical
+            foreach (var v in band)
+            {
+                if (welded[v].Count < 2 || welded[v][0] != v) continue;
+                float ax = 0, ay = 0, az = 0;
+                foreach (var u in welded[v]) { ax += next[u * 3]; ay += next[u * 3 + 1]; az += next[u * 3 + 2]; }
+                var al = MathF.Sqrt(ax * ax + ay * ay + az * az);
+                if (al <= 0) continue;
+                foreach (var u in welded[v]) { next[u * 3] = ax / al; next[u * 3 + 1] = ay / al; next[u * 3 + 2] = az / al; }
+            }
+            Array.Copy(next, normals, normals.Length);
+        }
+
+        // keep tangent frames orthogonal to the blended normals
+        foreach (var v in band)
+        {
+            var n = V(normals, v);
+            var t = V(tangents, v);
+            if (t.LengthSq <= 0) continue;
+            var b = V(bitangents, v);
+            t = (t - n * Vec.Dot(n, t)).Normalized();
+            var cross = Vec.Cross(n, t);
+            Store(tangents, v, t);
+            Store(bitangents, v, Vec.Dot(cross, b) < 0 ? -cross : cross);
+        }
     }
 
     /// <summary>
