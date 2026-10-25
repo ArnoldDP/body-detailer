@@ -186,6 +186,7 @@ public partial class MainWindow : Window
         var degree = Settings.Settings.Normals.SmoothDegree;
         var seamRings = Settings.Settings.Normals.SeamBlend;
         var conform = Settings.Settings.Normals.SeamConform;
+        var subdivision = Settings.Settings.Normals.Subdivision;
         var sets = _nifs.ToDictionary(n => n.Path, n => Sliders.SetFor(n.Path), StringComparer.OrdinalIgnoreCase);
         var sliderValues = Settings.Settings.NormalSliders;
         Status("Rebuilding normals…");
@@ -203,7 +204,10 @@ public partial class MainWindow : Window
             .GroupBy(m => m.Shape.TextureName)
             .Select(g => (g.Key, (IReadOnlyList<MeshInput>)g.ToList()))
             .ToList();
-        await Preview.Run(() => Preview.Renderer.SetMesh(groups));
+        // the renderer bakes from a subdivided copy; painting and picking use the mesh as loaded
+        var baked = await Task.Run(() => groups.Select(g => (g.Key, (IReadOnlyList<MeshInput>)g.Item2
+            .Select(m => { var (s, f) = Subdivision.Apply(m.Shape, m.Frames, subdivision); return new MeshInput(s, f); }).ToList())).ToList());
+        await Preview.Run(() => Preview.Renderer.SetMesh(baked));
         Painter.SetMesh(groups);
         var names = groups.Select(g => g.Key).ToList();
         if (!names.SequenceEqual(_groups))

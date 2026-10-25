@@ -124,6 +124,11 @@ public sealed class NormalLayer : Layer
     /// joins, so the body's surface carries on into it instead of meeting it at a crease. 0 turns it off.
     /// </summary>
     [Range(0, 20)] public float SeamConform { get; set; } = 8f;
+    /// <summary>
+    /// Times each triangle is split (into 4, 16, 64 pieces) with smoothly curving normals before baking, as in
+    /// MuDynamicNormalMap, so low-poly curves don't bake as facets. Higher is smoother but slower.
+    /// </summary>
+    [Range(0, 3)] public int Subdivision { get; set; } = 2;
     /// <summary>Optional tangent-space detail normal maps blended in, as in MuDynamicNormalMap, one per texture group.</summary>
     public Dictionary<string, string> DetailMaps { get; set; } = new(StringComparer.OrdinalIgnoreCase);
     public string? DetailMapFor(string group) => DetailMaps.TryGetValue(group, out var p) ? p : null;

@@ -204,8 +204,13 @@ public sealed class SurfaceFrames
             list.Add(i);
         }
 
+        var reach2 = SeamReach(shapes);
+        var sizes = shapes.Select(Size).ToArray();
+        var fullDistance = distance;
         for (var s = 0; s < shapes.Count; s++)
         {
+            if (IsInset(sizes[s], sizes.Max())) continue; // insets keep their crease
+            distance = MathF.Min(fullDistance, reach2[s]);
             // seam vertices of this shape and the correction (larger surface minus own normal) at each
             var seams = new List<(int V, Vec P, Vec Delta)>();
             for (var i = offsets[s]; i < offsets[s + 1]; i++)
@@ -309,11 +314,16 @@ public sealed class SurfaceFrames
 
         // distance in rings from the nearest vertex whose welded group spans more than one mesh
         var dist = Enumerable.Repeat(int.MaxValue, count).ToArray();
+        var origin = new int[count];
+        var reach = SeamReach(shapes);
+        var pos = new float[count * 3];
+        for (var s = 0; s < shapes.Count; s++) Array.Copy(shapes[s].Positions, 0, pos, offsets[s] * 3, shapes[s].Positions.Length);
         var queue = new Queue<int>();
         for (var i = 0; i < count; i++)
         {
             if (welded[i].Select(v => shapeOf[v]).Distinct().Count() < 2) continue;
             dist[i] = 0;
+            origin[i] = i;
             queue.Enqueue(i);
         }
         if (queue.Count == 0) return;
@@ -324,7 +334,9 @@ public sealed class SurfaceFrames
             foreach (var u in neighbours[v].Concat(welded[v]))
             {
                 var d = welded[v].Contains(u) ? dist[v] : dist[v] + 1;
-                if (d < dist[u]) { dist[u] = d; queue.Enqueue(u); }
+                if (d >= dist[u]) continue;
+                if ((V(pos, u) - V(pos, origin[v])).LengthSq > reach[shapeOf[u]] * reach[shapeOf[u]]) continue;
+                dist[u] = d; origin[u] = origin[v]; queue.Enqueue(u);
             }
         }
 
@@ -439,6 +451,34 @@ public sealed class SurfaceFrames
             result[i] = g;
         }
         return result;
+    }
+
+    /// <summary>
+    /// How far seam passes may reach into each shape: half its size, so a small part joined to the body
+    /// keeps its own shape instead of being smoothed flat end to end. Tiny insets (genitals, under 2% of the
+    /// largest shape's size) are meant to meet the body at a crease and only get a narrow strip.
+    /// </summary>
+    private static float[] SeamReach(IReadOnlyList<ShapeData> shapes)
+    {
+        var size = shapes.Select(Size).ToArray();
+        var largest = size.Max();
+        return size.Select(d => d * (IsInset(d, largest) ? 0.03f : 0.5f)).ToArray();
+    }
+
+    /// <summary>A small part set into a larger one (genitals in the body), as opposed to a head or hand that continues it.</summary>
+    private static bool IsInset(float size, float largest) => size < largest * 0.12f;
+
+    private static float Size(ShapeData s)
+    {
+        var P = s.Positions;
+        if (P.Length == 0) return 0f;
+        Vec min = new(float.MaxValue, float.MaxValue, float.MaxValue), max = new(float.MinValue, float.MinValue, float.MinValue);
+        for (var i = 0; i < P.Length; i += 3)
+        {
+            min = new(MathF.Min(min.X, P[i]), MathF.Min(min.Y, P[i + 1]), MathF.Min(min.Z, P[i + 2]));
+            max = new(MathF.Max(max.X, P[i]), MathF.Max(max.Y, P[i + 1]), MathF.Max(max.Z, P[i + 2]));
+        }
+        return MathF.Sqrt((max - min).LengthSq);
     }
 
     private static Vec V(float[] a, int i) => new(a[i * 3], a[i * 3 + 1], a[i * 3 + 2]);
