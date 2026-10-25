@@ -377,7 +377,7 @@
     },
     {
       "Name": "Face: Nose",
-      "Enabled": false,
+      "Enabled": true,
       "Strength": 1,
       "MaskPaths": {
         "femalehead": "D:\\Skin texture tool\\masks\\femalehead\\Nose.png"
@@ -956,7 +956,7 @@
     },
     {
       "Name": "Face: Under eyes",
-      "Enabled": false,
+      "Enabled": true,
       "Strength": 1,
       "MaskPaths": {
         "femalehead": "D:\\Skin texture tool\\masks\\femalehead\\Under eyes.png"
@@ -1149,7 +1149,7 @@
     },
     {
       "Name": "Face: Eyelids",
-      "Enabled": false,
+      "Enabled": true,
       "Strength": 1,
       "MaskPaths": {
         "femalehead": "D:\\Skin texture tool\\masks\\femalehead\\Eyelids.png"
@@ -1342,7 +1342,7 @@
     },
     {
       "Name": "Face: Brows",
-      "Enabled": false,
+      "Enabled": true,
       "Strength": 1,
       "MaskPaths": {
         "femalehead": "D:\\Skin texture tool\\masks\\femalehead\\Brows.png"
@@ -1535,7 +1535,7 @@
     },
     {
       "Name": "Face: Forehead",
-      "Enabled": false,
+      "Enabled": true,
       "Strength": 1,
       "MaskPaths": {
         "femalehead": "D:\\Skin texture tool\\masks\\femalehead\\Forehead.png"
@@ -1728,7 +1728,7 @@
     },
     {
       "Name": "Face: Chin",
-      "Enabled": false,
+      "Enabled": true,
       "Strength": 1,
       "MaskPaths": {
         "femalehead": "D:\\Skin texture tool\\masks\\femalehead\\Chin.png"
@@ -1921,7 +1921,7 @@
     },
     {
       "Name": "Face: Jaw",
-      "Enabled": false,
+      "Enabled": true,
       "Strength": 1,
       "MaskPaths": {
         "femalehead": "D:\\Skin texture tool\\masks\\femalehead\\Jaw.png"
@@ -2114,7 +2114,7 @@
     },
     {
       "Name": "Face: Under chin",
-      "Enabled": false,
+      "Enabled": true,
       "Strength": 1,
       "MaskPaths": {
         "femalehead": "D:\\Skin texture tool\\masks\\femalehead\\Under chin.png"
@@ -2307,7 +2307,7 @@
     },
     {
       "Name": "Face: Ears",
-      "Enabled": false,
+      "Enabled": true,
       "Strength": 1,
       "MaskPaths": {
         "femalehead": "D:\\Skin texture tool\\masks\\femalehead\\Ears.png"
@@ -2500,7 +2500,7 @@
     },
     {
       "Name": "Face: Nape",
-      "Enabled": false,
+      "Enabled": true,
       "Strength": 1,
       "MaskPaths": {
         "femalehead": "D:\\Skin texture tool\\masks\\femalehead\\Nape.png"
@@ -2693,7 +2693,7 @@
     },
     {
       "Name": "Face: Scalp",
-      "Enabled": false,
+      "Enabled": true,
       "Strength": 1,
       "MaskPaths": {
         "femalehead": "D:\\Skin texture tool\\masks\\femalehead\\Scalp.png"
@@ -2886,7 +2886,7 @@
     },
     {
       "Name": "Face: Neck (head)",
-      "Enabled": false,
+      "Enabled": true,
       "Strength": 1,
       "MaskPaths": {
         "femalehead": "D:\\Skin texture tool\\masks\\femalehead\\Neck (head).png"
@@ -3079,7 +3079,7 @@
     },
     {
       "Name": "Torso: Neck",
-      "Enabled": false,
+      "Enabled": true,
       "Strength": 1,
       "MaskPaths": {
         "femalebody_1": "D:\\Skin texture tool\\masks\\femalebody_1\\Neck.png"
@@ -3272,7 +3272,7 @@
     },
     {
       "Name": "Torso: Collarbone",
-      "Enabled": false,
+      "Enabled": true,
       "Strength": 1,
       "MaskPaths": {
         "femalebody_1": "D:\\Skin texture tool\\masks\\femalebody_1\\Collarbone.png"
@@ -3465,7 +3465,7 @@
     },
     {
       "Name": "Torso: Upper chest",
-      "Enabled": false,
+      "Enabled": true,
       "Strength": 1,
       "MaskPaths": {
         "femalebody_1": "D:\\Skin texture tool\\masks\\femalebody_1\\Upper chest.png"
@@ -3658,7 +3658,7 @@
     },
     {
       "Name": "Torso: Sternum",
-      "Enabled": false,
+      "Enabled": true,
       "Strength": 1,
       "MaskPaths": {
         "femalebody_1": "D:\\Skin texture tool\\masks\\femalebody_1\\Sternum.png"
@@ -3851,7 +3851,7 @@
     },
     {
       "Name": "Torso: Breasts",
-      "Enabled": false,
+      "Enabled": true,
       "Strength": 1,
       "MaskPaths": {
         "femalebody_1": "D:\\Skin texture tool\\masks\\femalebody_1\\Breasts.png"
@@ -4430,7 +4430,7 @@
     },
     {
       "Name": "Torso: Underbust",
-      "Enabled": false,
+      "Enabled": true,
       "Strength": 1,
       "MaskPaths": {
         "femalebody_1": "D:\\Skin texture tool\\masks\\femalebody_1\\Underbust.png"
@@ -4623,7 +4623,7 @@
     },
     {
       "Name": "Torso: Belly",
-      "Enabled": false,
+      "Enabled": true,
       "Strength": 1,
       "MaskPaths": {
         "femalebody_1": "D:\\Skin texture tool\\masks\\femalebody_1\\Belly.png"
@@ -4816,7 +4816,7 @@
     },
     {
       "Name": "Torso: Navel",
-      "Enabled": false,
+      "Enabled": true,
       "Strength": 1,
       "MaskPaths": {
         "femalebody_1": "D:\\Skin texture tool\\masks\\femalebody_1\\Navel.png"
@@ -5009,7 +5009,7 @@
     },
     {
       "Name": "Torso: Sides",
-      "Enabled": false,
+      "Enabled": true,
       "Strength": 1,
       "MaskPaths": {
         "femalebody_1": "D:\\Skin texture tool\\masks\\femalebody_1\\Sides.png"
@@ -5202,7 +5202,7 @@
     },
     {
       "Name": "Torso: Hips",
-      "Enabled": false,
+      "Enabled": true,
       "Strength": 1,
       "MaskPaths": {
         "femalebody_1": "D:\\Skin texture tool\\masks\\femalebody_1\\Hips.png"
@@ -5395,7 +5395,7 @@
     },
     {
       "Name": "Torso: Pubic region",
-      "Enabled": false,
+      "Enabled": true,
       "Strength": 1,
       "MaskPaths": {
         "femalebody_1": "D:\\Skin texture tool\\masks\\femalebody_1\\Pubic region.png"
@@ -5588,7 +5588,7 @@
     },
     {
       "Name": "Torso: Upper back",
-      "Enabled": false,
+      "Enabled": true,
       "Strength": 1,
       "MaskPaths": {
         "femalebody_1": "D:\\Skin texture tool\\masks\\femalebody_1\\Upper back.png"
@@ -5781,7 +5781,7 @@
     },
     {
       "Name": "Torso: Shoulder blades",
-      "Enabled": false,
+      "Enabled": true,
       "Strength": 1,
       "MaskPaths": {
         "femalebody_1": "D:\\Skin texture tool\\masks\\femalebody_1\\Shoulder blades.png"
@@ -5974,7 +5974,7 @@
     },
     {
       "Name": "Torso: Lower back",
-      "Enabled": false,
+      "Enabled": true,
       "Strength": 1,
       "MaskPaths": {
         "femalebody_1": "D:\\Skin texture tool\\masks\\femalebody_1\\Lower back.png"
@@ -6167,7 +6167,7 @@
     },
     {
       "Name": "Torso: Spine",
-      "Enabled": false,
+      "Enabled": true,
       "Strength": 1,
       "MaskPaths": {
         "femalebody_1": "D:\\Skin texture tool\\masks\\femalebody_1\\Spine.png"
@@ -6360,7 +6360,7 @@
     },
     {
       "Name": "Torso: Buttocks",
-      "Enabled": false,
+      "Enabled": true,
       "Strength": 1,
       "MaskPaths": {
         "femalebody_1": "D:\\Skin texture tool\\masks\\femalebody_1\\Buttocks.png"
@@ -7134,7 +7134,7 @@
     },
     {
       "Name": "Genitals: Perineum",
-      "Enabled": false,
+      "Enabled": true,
       "Strength": 1,
       "MaskPaths": {
         "femalebody_1": "D:\\Skin texture tool\\masks\\femalebody_1\\Perineum.png"
@@ -7327,7 +7327,7 @@
     },
     {
       "Name": "Joints: Shoulders",
-      "Enabled": false,
+      "Enabled": true,
       "Strength": 1,
       "MaskPaths": {
         "femalebody_1": "D:\\Skin texture tool\\masks\\femalebody_1\\Shoulders.png"
@@ -7713,7 +7713,7 @@
     },
     {
       "Name": "Joints: Inner elbows",
-      "Enabled": false,
+      "Enabled": true,
       "Strength": 1,
       "MaskPaths": {
         "femalebody_1": "D:\\Skin texture tool\\masks\\femalebody_1\\Inner elbows.png"
@@ -7906,7 +7906,7 @@
     },
     {
       "Name": "Joints: Wrists",
-      "Enabled": false,
+      "Enabled": true,
       "Strength": 1,
       "MaskPaths": {
         "femalebody_1": "D:\\Skin texture tool\\masks\\femalebody_1\\Wrists.png",
@@ -8100,7 +8100,7 @@
     },
     {
       "Name": "Joints: Hip creases",
-      "Enabled": false,
+      "Enabled": true,
       "Strength": 1,
       "MaskPaths": {
         "femalebody_1": "D:\\Skin texture tool\\masks\\femalebody_1\\Hip creases.png"
@@ -8486,7 +8486,7 @@
     },
     {
       "Name": "Joints: Back of knees",
-      "Enabled": false,
+      "Enabled": true,
       "Strength": 1,
       "MaskPaths": {
         "femalebody_1": "D:\\Skin texture tool\\masks\\femalebody_1\\Back of knees.png"
@@ -8679,7 +8679,7 @@
     },
     {
       "Name": "Joints: Ankles",
-      "Enabled": false,
+      "Enabled": true,
       "Strength": 1,
       "MaskPaths": {
         "femalebody_1": "D:\\Skin texture tool\\masks\\femalebody_1\\Ankles.png"
@@ -9258,7 +9258,7 @@
     },
     {
       "Name": "Arms: Biceps",
-      "Enabled": false,
+      "Enabled": true,
       "Strength": 1,
       "MaskPaths": {
         "femalebody_1": "D:\\Skin texture tool\\masks\\femalebody_1\\Biceps.png"
@@ -9451,7 +9451,7 @@
     },
     {
       "Name": "Arms: Triceps",
-      "Enabled": false,
+      "Enabled": true,
       "Strength": 1,
       "MaskPaths": {
         "femalebody_1": "D:\\Skin texture tool\\masks\\femalebody_1\\Triceps.png"
@@ -9644,7 +9644,7 @@
     },
     {
       "Name": "Arms: Inner upper arm",
-      "Enabled": false,
+      "Enabled": true,
       "Strength": 1,
       "MaskPaths": {
         "femalebody_1": "D:\\Skin texture tool\\masks\\femalebody_1\\Inner upper arm.png"
@@ -9837,7 +9837,7 @@
     },
     {
       "Name": "Arms: Forearms (outer)",
-      "Enabled": false,
+      "Enabled": true,
       "Strength": 1,
       "MaskPaths": {
         "femalebody_1": "D:\\Skin texture tool\\masks\\femalebody_1\\Forearms (outer).png"
@@ -10030,7 +10030,7 @@
     },
     {
       "Name": "Arms: Forearms (inner)",
-      "Enabled": false,
+      "Enabled": true,
       "Strength": 1,
       "MaskPaths": {
         "femalebody_1": "D:\\Skin texture tool\\masks\\femalebody_1\\Forearms (inner).png"
@@ -10416,7 +10416,7 @@
     },
     {
       "Name": "Hands: Back of hands",
-      "Enabled": false,
+      "Enabled": true,
       "Strength": 1,
       "MaskPaths": {
         "femalehands_1": "D:\\Skin texture tool\\masks\\femalehands_1\\Back of hands.png"
@@ -10609,7 +10609,7 @@
     },
     {
       "Name": "Hands: Fingers",
-      "Enabled": false,
+      "Enabled": true,
       "Strength": 1,
       "MaskPaths": {
         "femalehands_1": "D:\\Skin texture tool\\masks\\femalehands_1\\Fingers.png"
@@ -10995,7 +10995,7 @@
     },
     {
       "Name": "Legs: Thighs (front)",
-      "Enabled": false,
+      "Enabled": true,
       "Strength": 1,
       "MaskPaths": {
         "femalebody_1": "D:\\Skin texture tool\\masks\\femalebody_1\\Thighs (front).png"
@@ -11188,7 +11188,7 @@
     },
     {
       "Name": "Legs: Thighs (outer)",
-      "Enabled": false,
+      "Enabled": true,
       "Strength": 1,
       "MaskPaths": {
         "femalebody_1": "D:\\Skin texture tool\\masks\\femalebody_1\\Thighs (outer).png"
@@ -11381,7 +11381,7 @@
     },
     {
       "Name": "Legs: Thighs (inner)",
-      "Enabled": false,
+      "Enabled": true,
       "Strength": 1,
       "MaskPaths": {
         "femalebody_1": "D:\\Skin texture tool\\masks\\femalebody_1\\Thighs (inner).png"
@@ -11574,7 +11574,7 @@
     },
     {
       "Name": "Legs: Thighs (back)",
-      "Enabled": false,
+      "Enabled": true,
       "Strength": 1,
       "MaskPaths": {
         "femalebody_1": "D:\\Skin texture tool\\masks\\femalebody_1\\Thighs (back).png"
@@ -11767,7 +11767,7 @@
     },
     {
       "Name": "Legs: Shins",
-      "Enabled": false,
+      "Enabled": true,
       "Strength": 1,
       "MaskPaths": {
         "femalebody_1": "D:\\Skin texture tool\\masks\\femalebody_1\\Shins.png"
@@ -11960,7 +11960,7 @@
     },
     {
       "Name": "Legs: Calves",
-      "Enabled": false,
+      "Enabled": true,
       "Strength": 1,
       "MaskPaths": {
         "femalebody_1": "D:\\Skin texture tool\\masks\\femalebody_1\\Calves.png"
@@ -12346,7 +12346,7 @@
     },
     {
       "Name": "Feet: Heels",
-      "Enabled": false,
+      "Enabled": true,
       "Strength": 1,
       "MaskPaths": {
         "femalebody_1": "D:\\Skin texture tool\\masks\\femalebody_1\\Heels.png"
@@ -12539,7 +12539,7 @@
     },
     {
       "Name": "Feet: Toes",
-      "Enabled": false,
+      "Enabled": true,
       "Strength": 1,
       "MaskPaths": {
         "femalebody_1": "D:\\Skin texture tool\\masks\\femalebody_1\\Toes.png"
@@ -12732,7 +12732,7 @@
     },
     {
       "Name": "Feet: Top of feet",
-      "Enabled": false,
+      "Enabled": true,
       "Strength": 1,
       "MaskPaths": {
         "femalebody_1": "D:\\Skin texture tool\\masks\\femalebody_1\\Top of feet.png"

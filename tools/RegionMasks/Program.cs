@@ -43,7 +43,13 @@ for (float z = 12; z <= 60; z += 2)
 var mid = Enumerable.Range(0, body.VertexCount).Where(i => Math.Abs(BX(i)) < 0.35f && BY(i) > 0 && BZ(i) > 70 && BZ(i) < 90).ToList();
 var navel = mid.MaxBy(i => { var near = mid.Where(j => Math.Abs(BZ(j) - BZ(i)) is > 1.2f and < 2.5f).ToList(); return near.Count == 0 ? -9 : near.Average(BY) - BY(i); });
 var navelP = (Y: BY(navel), Z: BZ(navel));
-var nipple = Enumerable.Range(0, body.VertexCount).Where(i => BX(i) > 2 && BZ(i) > 75 && BZ(i) < 105).MaxBy(BY);
+// nipple: the chest point standing out furthest from the surface around it (not just the most forward one)
+var chest = Enumerable.Range(0, body.VertexCount).Where(i => BX(i) > 1.5f && BZ(i) > 82 && BZ(i) < 102 && BY(i) > 2).ToList();
+var nipple = chest.MaxBy(i =>
+{
+    var ring = chest.Where(j => { var d = Sq(BX(j) - BX(i)) + Sq(BZ(j) - BZ(i)); return d > 1.5f * 1.5f && d < 2.5f * 2.5f; }).ToList();
+    return ring.Count < 4 ? -9 : BY(i) - ring.Average(BY);
+});
 var nipP = (X: BX(nipple), Y: BY(nipple), Z: BZ(nipple));
 Console.WriteLine($"navel y{navelP.Y:F1} z{navelP.Z:F1}; nipple {nipP}; arm centres " + string.Join(" ", armCentre.Select(c => $"z{c.Z}:({c.X:F1},{c.Y:F1})")));
 var hands = shapes.First(s => s.Name == "artHands");
@@ -360,7 +366,8 @@ static void MakePreset(string outDir, string basePath, List<(string Name, string
         foreach (var (group, names) in used)
             if (names.Contains(name)) region.MaskPaths[group] = Path.GetFullPath(Path.Combine(outDir, group, name + ".png"));
         if (region.MaskPaths.Count == 0) continue;
-        region.Enabled = tweaks.TryGetValue(name, out var tweak);
+        region.Enabled = true;
+        tweaks.TryGetValue(name, out var tweak);
         tweak?.Invoke(region.Settings);
         settings.Regions.Add(region);
     }
