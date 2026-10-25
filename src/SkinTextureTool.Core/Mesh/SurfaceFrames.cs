@@ -19,7 +19,7 @@ public sealed class SurfaceFrames
     /// <param name="weldTolerance">Positions closer than this count as the same point.</param>
     /// <param name="positions">Optional per-shape positions to use instead of the shapes' own (a morphed copy, for slider-driven normals).</param>
     public static List<SurfaceFrames> Build(IReadOnlyList<ShapeData> shapes, float smoothDegree = 60f, bool allowInvertSmooth = false,
-        float weldTolerance = 1e-4f, IReadOnlyList<float[]>? positions = null, float boundaryTolerance = 5e-3f, int seamRings = 6)
+        float weldTolerance = 1e-4f, IReadOnlyList<float[]>? positions = null, float boundaryTolerance = 5e-3f, int seamRings = 6, float conformDistance = 8f)
     {
         // Flatten every shape into one vertex/face list so seams between shapes are welded too.
         var offsets = new int[shapes.Count + 1];
@@ -119,6 +119,8 @@ public sealed class SurfaceFrames
             uvScales[i * 2] = tLen / used; uvScales[i * 2 + 1] = bLen / used;
         });
 
+        if (conformDistance > 0 && shapes.Count > 1)
+            ConformSeams(shapes, offsets, faces, faceN, boundary, pos, welded, normals, conformDistance);
         if (seamRings > 0 && shapes.Count > 1)
             BlendSeams(shapes, offsets, faces, welded, normals, tangents, bitangents, seamRings);
 
@@ -135,6 +137,151 @@ public sealed class SurfaceFrames
             });
         }
         return result;
+    }
+
+    /// <summary>
+    /// A smaller mesh meeting a larger one along an open edge (a head on the body's neck) is often shaped
+    /// differently right at the join and doesn't share most of its edge vertices. Here the smaller mesh's
+    /// normals near that edge are turned to match the larger mesh's own surface direction at the nearest point,
+    /// fully at the edge and fading out over <paramref name="distance"/> world units, so the larger surface
+    /// carries on into the smaller one instead of meeting it at a crease.
+    /// </summary>
+    private static void ConformSeams(IReadOnlyList<ShapeData> shapes, int[] offsets, List<(int A, int B, int C)> faces, Vec[] faceN,
+        bool[] boundary, float[] pos, List<int>[] welded, float[] normals, float distance)
+    {
+        const float reach = 2f; // how far apart two meshes' edges can be and still count as joined
+        var count = normals.Length / 3;
+        var shapeOf = new int[count];
+        for (var s = 0; s < shapes.Count; s++)
+            for (var v = offsets[s]; v < offsets[s + 1]; v++) shapeOf[v] = s;
+        var area = new double[shapes.Count];
+        var shapeFaces = new List<int>[shapes.Count];
+        for (var s = 0; s < shapes.Count; s++) shapeFaces[s] = new List<int>();
+        for (var f = 0; f < faces.Count; f++)
+        {
+            var (a, b, c) = faces[f];
+            var s = shapeOf[a];
+            area[s] += MathF.Sqrt(Vec.Cross(V(pos, b) - V(pos, a), V(pos, c) - V(pos, a)).LengthSq) * 0.5;
+            shapeFaces[s].Add(f);
+        }
+
+        // face centres of each shape, gridded, to read a shape's own surface direction near a point
+        var faceCentre = new Vec[faces.Count];
+        var faceGrid = new Dictionary<(int, long, long, long), List<int>>();
+        (long, long, long) Cell(Vec p, float size) => ((long)MathF.Floor(p.X / size), (long)MathF.Floor(p.Y / size), (long)MathF.Floor(p.Z / size));
+        for (var f = 0; f < faces.Count; f++)
+        {
+            var (a, b, c) = faces[f];
+            faceCentre[f] = (V(pos, a) + V(pos, b) + V(pos, c)) * (1f / 3f);
+            var (x, y, z) = Cell(faceCentre[f], reach);
+            var key = (shapeOf[a], x, y, z);
+            if (!faceGrid.TryGetValue(key, out var list)) faceGrid[key] = list = new List<int>();
+            list.Add(f);
+        }
+        Vec SurfaceNear(int shape, Vec p)
+        {
+            Vec sum = default;
+            var (x, y, z) = Cell(p, reach);
+            for (var dx = -1; dx <= 1; dx++) for (var dy = -1; dy <= 1; dy++) for (var dz = -1; dz <= 1; dz++)
+            {
+                if (!faceGrid.TryGetValue((shape, x + dx, y + dy, z + dz), out var list)) continue;
+                foreach (var f in list)
+                {
+                    var d2 = (faceCentre[f] - p).LengthSq;
+                    if (d2 < reach * reach) sum += faceN[f] * (1f - MathF.Sqrt(d2) / reach);
+                }
+            }
+            return sum.Normalized();
+        }
+
+        // open-edge vertices of each shape, gridded, to find where a smaller shape's edge meets a larger one's
+        var edgeGrid = new Dictionary<(long, long, long), List<int>>();
+        for (var i = 0; i < count; i++)
+        {
+            if (!boundary[i]) continue;
+            var c = Cell(V(pos, i), reach);
+            if (!edgeGrid.TryGetValue(c, out var list)) edgeGrid[c] = list = new List<int>();
+            list.Add(i);
+        }
+
+        for (var s = 0; s < shapes.Count; s++)
+        {
+            // seam vertices of this shape and the correction (larger surface minus own normal) at each
+            var seams = new List<(int V, Vec P, Vec Delta)>();
+            for (var i = offsets[s]; i < offsets[s + 1]; i++)
+            {
+                if (!boundary[i]) continue;
+                var p = V(pos, i);
+                var (x, y, z) = Cell(p, reach);
+                int leader = -1; var best = reach * reach;
+                for (var dx = -1; dx <= 1; dx++) for (var dy = -1; dy <= 1; dy++) for (var dz = -1; dz <= 1; dz++)
+                {
+                    if (!edgeGrid.TryGetValue((x + dx, y + dy, z + dz), out var list)) continue;
+                    foreach (var j in list)
+                    {
+                        if (area[shapeOf[j]] <= area[s]) continue;
+                        var d2 = (V(pos, j) - p).LengthSq;
+                        if (d2 < best) { best = d2; leader = shapeOf[j]; }
+                    }
+                }
+                if (leader < 0) continue;
+                var target = SurfaceNear(leader, p);
+                if (target.LengthSq <= 0) continue;
+                seams.Add((i, p, target - V(normals, i)));
+            }
+            if (seams.Count == 0) continue;
+
+            // Within the band the normals are re-interpolated smoothly (repeated neighbour averaging) between the
+            // larger surface's direction at the seam and the shape's own normals at the band's far edge, which
+            // also irons out any bend the smaller mesh has right at its rim. The result fades in towards the seam.
+            var seamTarget = new Dictionary<int, Vec>();
+            foreach (var (v, sp, sd) in seams) seamTarget[v] = V(normals, v) + sd;
+            var fade = new Dictionary<int, float>();
+            for (var i = offsets[s]; i < offsets[s + 1]; i++)
+            {
+                var p = V(pos, i);
+                var nearest = float.MaxValue;
+                foreach (var (_, sp, _) in seams) nearest = MathF.Min(nearest, MathF.Sqrt((sp - p).LengthSq));
+                if (nearest >= distance) continue;
+                var t = 1f - nearest / distance;
+                fade[i] = t * t * (3 - 2 * t);
+            }
+            var neighbours = new Dictionary<int, HashSet<int>>();
+            foreach (var f in shapeFaces[s])
+            {
+                var (fa, fb, fc) = faces[f];
+                foreach (var (x, y) in new[] { (fa, fb), (fb, fc), (fc, fa) })
+                {
+                    if (!fade.ContainsKey(x) && !fade.ContainsKey(y)) continue;
+                    (neighbours.TryGetValue(x, out var nx) ? nx : neighbours[x] = new HashSet<int>()).Add(y);
+                    (neighbours.TryGetValue(y, out var ny) ? ny : neighbours[y] = new HashSet<int>()).Add(x);
+                }
+            }
+            var smooth = new Dictionary<int, Vec>();
+            foreach (var v in neighbours.Keys) smooth[v] = seamTarget.TryGetValue(v, out var st) ? st.Normalized() : V(normals, v);
+            var free = fade.Keys.Where(v => !seamTarget.ContainsKey(v) && neighbours.ContainsKey(v)).ToArray();
+            for (var iteration = 0; iteration < 400; iteration++)
+            {
+                var next = new Vec[free.Length];
+                for (var k = 0; k < free.Length; k++)
+                {
+                    Vec sum = default;
+                    foreach (var u in neighbours[free[k]]) sum += smooth[u];
+                    next[k] = sum.Normalized();
+                }
+                for (var k = 0; k < free.Length; k++) smooth[free[k]] = next[k];
+            }
+
+            var changed = new List<(int V, Vec N)>();
+            foreach (var (v, w) in fade)
+            {
+                if (!smooth.TryGetValue(v, out var target)) continue;
+                var own = V(normals, v);
+                changed.Add((v, (own + (target - own) * w).Normalized()));
+            }
+            foreach (var (v, n) in changed)
+                foreach (var u in welded[v]) Store(normals, u, n);
+        }
     }
 
     /// <summary>

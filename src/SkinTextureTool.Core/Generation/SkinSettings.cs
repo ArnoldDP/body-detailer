@@ -119,6 +119,11 @@ public sealed class NormalLayer : Layer
     [Range(0, 180)] public float SmoothDegree { get; set; } = 60f;
     /// <summary>Rings of vertices either side of a seam between meshes over which normals are blended.</summary>
     [Range(0, 20)] public int SeamBlend { get; set; } = 6;
+    /// <summary>
+    /// World units over which a smaller mesh's edge (a head's neck) is turned to follow the larger mesh it
+    /// joins, so the body's surface carries on into it instead of meeting it at a crease. 0 turns it off.
+    /// </summary>
+    [Range(0, 20)] public float SeamConform { get; set; } = 8f;
     /// <summary>Optional tangent-space detail normal maps blended in, as in MuDynamicNormalMap, one per texture group.</summary>
     public Dictionary<string, string> DetailMaps { get; set; } = new(StringComparer.OrdinalIgnoreCase);
     public string? DetailMapFor(string group) => DetailMaps.TryGetValue(group, out var p) ? p : null;

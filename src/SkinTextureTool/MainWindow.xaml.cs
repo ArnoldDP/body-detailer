@@ -151,6 +151,7 @@ public partial class MainWindow : Window
         }
         var degree = Settings.Settings.Normals.SmoothDegree;
         var seamRings = Settings.Settings.Normals.SeamBlend;
+        var conform = Settings.Settings.Normals.SeamConform;
         var sets = _nifs.ToDictionary(n => n.Path, n => Sliders.SetFor(n.Path), StringComparer.OrdinalIgnoreCase);
         var sliderValues = Settings.Settings.NormalSliders;
         Status("Rebuilding normals…");
@@ -161,7 +162,7 @@ public partial class MainWindow : Window
                 sets.TryGetValue(s.NifPath, out var set) && set != null && sliderValues.TryGetValue(set.Name, out var values) && values.Count > 0
                     ? _morpher.Apply(set, s.Name, s.Positions, values, problems)
                     : s.Positions).ToList();
-            return SurfaceFrames.Build(shapes, degree, positions: morphed, seamRings: seamRings);
+            return SurfaceFrames.Build(shapes, degree, positions: morphed, seamRings: seamRings, conformDistance: conform);
         });
 
         var groups = shapes.Select((s, i) => new MeshInput(s, frames[i]))
