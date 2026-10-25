@@ -1,9 +1,10 @@
 namespace SkinTextureTool.Core.Mesh;
 
 /// <summary>
-/// Splits every triangle into smaller ones before baking, as MuDynamicNormalMap does, with the normal following a
-/// curved (PN-triangle quadratic) patch instead of a straight blend between the corners. Low-poly areas with
-/// strong curvature then bake smooth gradients instead of visible triangle facets.
+/// Splits every triangle into smaller ones before baking, as MuDynamicNormalMap does, then relaxes the normals
+/// across the finer mesh. A straight blend between corner normals changes direction abruptly at every original
+/// edge (the "crunchy" look on strong curves); relaxing smooths those creases out. (Curved per-triangle patches
+/// were tried first and baked each triangle as a little dome, like scales.)
 /// </summary>
 public static class Subdivision
 {
@@ -22,8 +23,6 @@ public static class Subdivision
         {
             int a = (int)shape.Indices[t * 3], b = (int)shape.Indices[t * 3 + 1], c = (int)shape.Indices[t * 3 + 2];
             var na = V(N, a); var nb = V(N, b); var nc = V(N, c);
-            var pa = V(P, a); var pb = V(P, b); var pc = V(P, c);
-            var nab = EdgeNormal(pa, pb, na, nb); var nbc = EdgeNormal(pb, pc, nb, nc); var nca = EdgeNormal(pc, pa, nc, na);
             var start = vi;
             for (var i = 0; i <= seg; i++)
             for (var j = 0; j <= seg - i; j++)
@@ -40,9 +39,7 @@ public static class Subdivision
                     uv[vi * 2 + k] = U[a * 2 + k] * wa + U[b * 2 + k] * wb + U[c * 2 + k] * wc;
                     scl[vi * 2 + k] = S[a * 2 + k] * wa + S[b * 2 + k] * wb + S[c * 2 + k] * wc;
                 }
-                // quadratic normal: corners plus a bent mid-edge normal per edge
-                var n = na * (wa * wa) + nb * (wb * wb) + nc * (wc * wc) + nab * (wa * wb) + nbc * (wb * wc) + nca * (wc * wa);
-                n = n.Normalized();
+                var n = (na * wa + nb * wb + nc * wc).Normalized();
                 nrm[vi * 3] = n.X; nrm[vi * 3 + 1] = n.Y; nrm[vi * 3 + 2] = n.Z;
                 vi++;
             }
@@ -58,6 +55,16 @@ public static class Subdivision
             }
         }
         Array.Resize(ref idx, ii);
+        Relax(pos, nrm, idx, vi, seg * 2);
+        // keep tangents perpendicular to the relaxed normals
+        for (var v = 0; v < vi; v++)
+        {
+            var n = V(nrm, v); var t = V(tan, v);
+            t = t - n * Vec.Dot(n, t);
+            var l = MathF.Sqrt(Vec.Dot(t, t));
+            if (l <= 0) continue;
+            tan[v * 3] = t.X / l; tan[v * 3 + 1] = t.Y / l; tan[v * 3 + 2] = t.Z / l;
+        }
         var sub = new ShapeData
         {
             Name = shape.Name, NifPath = shape.NifPath, Positions = pos, Uvs = uv, Indices = idx,
@@ -66,13 +73,43 @@ public static class Subdivision
         return (sub, new SurfaceFrames { Normals = nrm, Tangents = tan, Bitangents = bit, UvScales = scl });
     }
 
-    // PN-triangle mid-edge normal: the two corner normals reflected about the plane across the edge
-    private static Vec EdgeNormal(Vec p0, Vec p1, Vec n0, Vec n1)
+    /// <summary>
+    /// Averages each normal with its neighbours a few times. Vertices at the same point (shared edges, UV seams)
+    /// are treated as one, so the result stays continuous across triangles and seams.
+    /// </summary>
+    private static void Relax(float[] pos, float[] nrm, uint[] idx, int count, int iterations)
     {
-        var d = p1 - p0;
-        var dd = Vec.Dot(d, d);
-        var v = dd > 0 ? 2 * Vec.Dot(d, n0 + n1) / dd : 0;
-        return (n0 + n1 - d * v).Normalized();
+        var key = new Dictionary<(long, long, long), int>();
+        var point = new int[count];
+        for (var v = 0; v < count; v++)
+        {
+            var k = ((long)MathF.Round(pos[v * 3] * 2000), (long)MathF.Round(pos[v * 3 + 1] * 2000), (long)MathF.Round(pos[v * 3 + 2] * 2000));
+            if (!key.TryGetValue(k, out var id)) key[k] = id = key.Count;
+            point[v] = id;
+        }
+        var points = key.Count;
+        var neighbours = new HashSet<int>[points];
+        for (var i = 0; i < points; i++) neighbours[i] = new HashSet<int>();
+        for (var t = 0; t + 2 < idx.Length; t += 3)
+        {
+            int a = point[idx[t]], b = point[idx[t + 1]], c = point[idx[t + 2]];
+            neighbours[a].Add(b); neighbours[a].Add(c); neighbours[b].Add(a); neighbours[b].Add(c); neighbours[c].Add(a); neighbours[c].Add(b);
+        }
+        var n = new Vec[points];
+        for (var v = 0; v < count; v++) n[point[v]] += V(nrm, v);
+        for (var i = 0; i < points; i++) n[i] = n[i].Normalized();
+        for (var it = 0; it < iterations; it++)
+        {
+            var next = new Vec[points];
+            Parallel.For(0, points, i =>
+            {
+                var sum = n[i];
+                foreach (var j in neighbours[i]) sum += n[j];
+                next[i] = sum.Normalized();
+            });
+            n = next;
+        }
+        for (var v = 0; v < count; v++) { var m = n[point[v]]; nrm[v * 3] = m.X; nrm[v * 3 + 1] = m.Y; nrm[v * 3 + 2] = m.Z; }
     }
 
     private static Vec V(float[] a, int i) => new(a[i * 3], a[i * 3 + 1], a[i * 3 + 2]);
