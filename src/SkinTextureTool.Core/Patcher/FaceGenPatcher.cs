@@ -29,6 +29,23 @@ public sealed class FaceGenPatcher
     public static string FaceGenPath(INpcGetter npc) =>
         $@"meshes\actors\character\facegendata\facegeom\{npc.FormKey.ModKey.FileName}\{npc.FormKey.ID:X8}.nif";
 
+    /// <summary>The body mesh path a race's own skin uses for one sex.</summary>
+    public string? BodyPath(IRaceGetter race, bool female)
+    {
+        if (!race.Skin.TryResolve(_cache, out var skin)) return null;
+        var races = new List<Mutagen.Bethesda.Plugins.FormKey> { race.FormKey };
+        if (!race.ArmorRace.IsNull) races.Add(race.ArmorRace.FormKey);
+        foreach (var link in skin.Armature)
+        {
+            if (!link.TryResolve(_cache, out var addon) || addon.BodyTemplate == null) continue;
+            if (!addon.BodyTemplate.FirstPersonFlags.HasFlag(BipedObjectFlag.Body)) continue;
+            if (!races.Any(r => addon.Race.FormKey == r || addon.AdditionalRaces.Any(a => a.FormKey == r))) continue;
+            var model = female ? addon.WorldModel?.Female?.File : addon.WorldModel?.Male?.File;
+            if (model != null) return MeshPath(model.ToString());
+        }
+        return null;
+    }
+
     /// <summary>The body mesh path (without _0/_1) the NPC wears: its own skin, else its race's.</summary>
     public string? BodyPath(INpcGetter npc)
     {
@@ -113,6 +130,8 @@ public sealed class FaceGenPatcher
     }
 
     /// <summary>The body's skin shape blended between its _0 and _1 meshes by weight (0..1).</summary>
+    public ShapeData? LoadBody(string path, float weight) => Body(path, weight);
+
     private ShapeData? Body(string path, float weight)
     {
         var key = $"{path}|{weight:0.00}";

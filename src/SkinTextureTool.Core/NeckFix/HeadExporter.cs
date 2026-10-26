@@ -43,6 +43,18 @@ public static class HeadExporter
     }
 
     /// <summary>"meshes\...\file.nif" from a full path, or null if there's no meshes folder in it.</summary>
+    /// <summary>A shape's vertices as stored in the NIF (its own vertex space, as .tri files store them).</summary>
+    public static float[] LocalPositions(string nifPath, string shapeName)
+    {
+        using var nif = new NifFile();
+        if (nif.Load(nifPath) != 0) throw new InvalidDataException($"Couldn't read {nifPath}.");
+        var shape = nif.GetShapes().First(s => s.name.get() == shapeName);
+        var verts = nif.GetVertsForShape(shape);
+        var result = new float[verts.Count * 3];
+        for (var i = 0; i < verts.Count; i++) { result[i * 3] = verts[i].x; result[i * 3 + 1] = verts[i].y; result[i * 3 + 2] = verts[i].z; }
+        return result;
+    }
+
     /// <summary>
     /// Writes <paramref name="sourceNif"/> to <paramref name="target"/> with one shape's vertices moved (positions
     /// in the space BodyMesh loads), merged vertices given their partner's weights, and normals recalculated.
@@ -118,6 +130,24 @@ public static class HeadExporter
 public static class TriFile
 {
     private const int HeaderSize = 64; // magic + 14 ints
+
+    /// <summary>Vertex count of a .tri in the load order, or -1.</summary>
+    public static int VertexCount(SkinTextureTool.Core.Patcher.VirtualData data, string relative)
+    {
+        var file = data.Materialize(relative);
+        return file == null ? -1 : VertexCount(file);
+    }
+
+    /// <summary>Whether the .tri's stored base shape is these positions (the mesh it was built for).</summary>
+    public static bool SameBase(string path, float[] positions, float tolerance = 1e-3f)
+    {
+        using var r = new BinaryReader(File.OpenRead(path));
+        if (new string(r.ReadChars(8)) != "FRTRI003" || r.ReadInt32() * 3 != positions.Length) return false;
+        r.BaseStream.Position = HeaderSize;
+        for (var i = 0; i < positions.Length; i++)
+            if (MathF.Abs(r.ReadSingle() - positions[i]) > tolerance) return false;
+        return true;
+    }
 
     public static int VertexCount(string path)
     {

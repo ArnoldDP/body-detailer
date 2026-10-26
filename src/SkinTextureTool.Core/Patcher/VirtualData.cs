@@ -43,6 +43,15 @@ public sealed class VirtualData : IDisposable
 
     private static string Normalize(string path) => path.Replace('/', '\\').TrimStart('\\');
 
+    /// <summary>Every data path under a folder (loose or archived), backslashed.</summary>
+    public IEnumerable<string> Paths(string folder)
+    {
+        var prefix = Normalize(folder);
+        return _mo2.Files.Keys.Where(k => k.StartsWith(prefix, StringComparison.OrdinalIgnoreCase))
+            .Concat(_archived.Keys.Where(k => k.StartsWith(prefix, StringComparison.OrdinalIgnoreCase)))
+            .Distinct(StringComparer.OrdinalIgnoreCase);
+    }
+
     public bool Exists(string relative) => _mo2.Files.ContainsKey(Normalize(relative)) || _archived.ContainsKey(Normalize(relative));
 
     /// <summary>A real file path for reading: the loose file, or the archived one extracted to a temporary folder.</summary>

@@ -18,9 +18,18 @@ public static class NpcBatch
     public sealed record Summary(int Npcs, int Fitted, int Written, Dictionary<string, int> Skipped, Dictionary<string, int> FittedByPlugin,
         int Folded, double LargestMove, TimeSpan Took, List<string> Notes)
     {
+        public HeadPartBatch.Outcome? Heads { get; init; }
+
         public string ToText()
         {
             var sb = new StringBuilder();
+            if (Heads != null)
+            {
+                sb.AppendLine($"PLAYER HEADS: {Heads.Heads} playable head mesh(es), {Heads.Written} written, {Heads.Tris} .tri file(s) patched to match.");
+                foreach (var l in Heads.Lines) sb.AppendLine("  " + l);
+                sb.AppendLine();
+                sb.AppendLine("NPC FACEGEN HEADS:");
+            }
             sb.AppendLine($"{Npcs} NPCs with their own FaceGen head; {Fitted} fitted to their body, {Written} written ({Took.TotalSeconds:0} s).");
             sb.AppendLine($"Largest vertex move {LargestMove:0.00} units; {Folded} heads left out because even a short bend would fold a triangle.");
             sb.AppendLine("Skipped:");
@@ -56,6 +65,7 @@ public static class NpcBatch
         var cache = mods.ToImmutableLinkCache();
         using var data = new VirtualData(mo2);
         var patcher = new FaceGenPatcher(data, cache) { Band = band };
+        var priority = Enumerable.Reverse(mods).ToList();
         var outputFull = output == null ? null : Path.GetFullPath(output);
         if (outputFull != null)
         {
@@ -71,7 +81,8 @@ public static class NpcBatch
         // shares with other NPCs are left alone: expressions don't move the neck edge (under 0.001 units in the High
         // Poly Head expressions), and the one morph that does, SkinnyMorph, is how the engine applies weight to a
         // head built at runtime — the player's — while FaceGen heads are already baked for their NPC's weight.
-        foreach (var npc in Enumerable.Reverse(mods).Npc().WinningOverrides())
+        var heads = HeadPartBatch.Run(priority, cache, data, patcher, outputFull, band, progress);
+        foreach (var npc in priority.Npc().WinningOverrides())
         {
             if (!npc.Template.IsNull && npc.Configuration.TemplateFlags.HasFlag(NpcConfiguration.TemplateFlag.Traits)) continue;
             if (!data.Exists(FaceGenPatcher.FaceGenPath(npc))) continue;
@@ -114,12 +125,12 @@ public static class NpcBatch
         notes.Insert(0, $"{merged} heads had their extra neck vertices merged into body-matching neighbours (no T-junctions left).");
         foreach (var m in mo2.SkippedOutputMods) notes.Insert(0, $"Not read as input (holds this tool's output): {m}");
         if (gentler > 0) notes.Insert(0, $"{gentler} heads needed a shorter bend to avoid folding a triangle.");
-        return new Summary(npcs, fitted, written, skipped, byPlugin, folded, largest, DateTime.Now - started, notes);
+        return new Summary(npcs, fitted, written, skipped, byPlugin, folded, largest, DateTime.Now - started, notes) { Heads = heads };
     }
 
     private static void Count(Dictionary<string, int> d, string key) => d[key] = d.GetValueOrDefault(key) + 1;
 
-    private static int Folds(float[] a, float[] b, uint[] idx, IReadOnlyDictionary<int, int>? merges = null)
+    internal static int Folds(float[] a, float[] b, uint[] idx, IReadOnlyDictionary<int, int>? merges = null)
     {
         var n = 0;
         for (var t = 0; t + 2 < idx.Length; t += 3)
