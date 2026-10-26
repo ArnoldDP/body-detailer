@@ -11,14 +11,19 @@ public sealed class VirtualData : IDisposable
 {
     private readonly Mo2Instance _mo2;
     private readonly Dictionary<string, IArchiveFile> _archived = new(StringComparer.OrdinalIgnoreCase);
-    private readonly string _extractFolder = Path.Combine(Path.GetTempPath(), "SkinTextureTool-extract-" + Environment.ProcessId);
+    private readonly string _extractFolder;
+    private readonly bool _keepExtracted;
 
     public IReadOnlyList<string> Archives { get; }
     public List<string> Problems { get; } = new();
 
-    public VirtualData(Mo2Instance mo2)
+    /// <param name="extractFolder">Where archived files are extracted to and kept; by default a temporary folder
+    /// that is removed again.</param>
+    public VirtualData(Mo2Instance mo2, string? extractFolder = null)
     {
         _mo2 = mo2;
+        _keepExtracted = extractFolder != null;
+        _extractFolder = extractFolder ?? Path.Combine(Path.GetTempPath(), "SkinTextureTool-extract-" + Environment.ProcessId);
         var archives = new List<string>();
         foreach (var name in mo2.ArchivesInOrder())
         {
@@ -57,6 +62,7 @@ public sealed class VirtualData : IDisposable
 
     public void Dispose()
     {
+        if (_keepExtracted) return;
         try { if (Directory.Exists(_extractFolder)) Directory.Delete(_extractFolder, true); } catch { }
     }
 }

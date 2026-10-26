@@ -10,6 +10,10 @@
             <StackPanel Orientation="Horizontal">
                 <Button Content="Add NIFs…" Padding="12,4" Click="OnAddNifs"
                         ToolTip="Body, hands, feet, head… loaded together share one surface, so detail lines up across seams"/>
+                <Button Content="Add female body" Padding="10,4" Margin="6,0,0,0" Click="OnAddFemaleBody"
+                        ToolTip="Loads the femalebody_1, femalehands_1 and femalefeet_1 meshes your MO2 load order uses (the winning copies), so only the head is left to add"/>
+                <Button Content="Add male body" Padding="10,4" Margin="6,0,0,0" Click="OnAddMaleBody"
+                        ToolTip="Loads the malebody_1, malehands_1 and malefeet_1 meshes your MO2 load order uses (the winning copies), so only the head is left to add"/>
                 <Button Content="Clear meshes" Padding="10,4" Margin="6,0,0,0" Click="OnClearNifs"/>
                 <Button Content="Load preset…" Padding="10,4" Margin="18,0,0,0" Click="OnLoadPreset"/>
                 <Button Content="Save preset…" Padding="10,4" Margin="6,0,0,0" Click="OnSavePreset"/>

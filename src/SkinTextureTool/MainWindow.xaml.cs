@@ -119,6 +119,50 @@ public partial class MainWindow : Window
         }
     }
 
+    private async void OnAddFemaleBody(object sender, RoutedEventArgs e) => await AddBodyAsync("female");
+    private async void OnAddMaleBody(object sender, RoutedEventArgs e) => await AddBodyAsync("male");
+
+    /// <summary>
+    /// Adds the body, hands and feet the MO2 load order actually uses (the winning copies: overwrite, then the
+    /// highest-priority mod, then archives). Meshes found only in an archive are extracted next to the tool.
+    /// </summary>
+    private async Task AddBodyAsync(string sex)
+    {
+        var mo2Folder = Patcher.Mo2Folder;
+        if (!File.Exists(Path.Combine(mo2Folder, "ModOrganizer.ini")))
+        {
+            var dlg = new OpenFolderDialog { Title = "Your Mod Organizer 2 folder (the one with ModOrganizer.ini)" };
+            if (dlg.ShowDialog(this) != true) return;
+            mo2Folder = Patcher.Mo2Folder = dlg.FolderName;
+            if (!File.Exists(Path.Combine(mo2Folder, "ModOrganizer.ini"))) { Status("That folder has no ModOrganizer.ini."); return; }
+        }
+        Status($"Finding the {sex} body meshes your load order uses…");
+        try
+        {
+            var extract = Path.Combine(AppContext.BaseDirectory, "Extracted meshes");
+            var (found, missing) = await Task.Run(() =>
+            {
+                var mo2 = new SkinTextureTool.Core.Patcher.Mo2Instance(mo2Folder);
+                using var data = new SkinTextureTool.Core.Patcher.VirtualData(mo2, extract);
+                var paths = new List<string>(); var lost = new List<string>();
+                foreach (var part in new[] { "body", "hands", "feet" })
+                {
+                    var rel = $"meshes/actors/character/character assets/{sex}{part}_1.nif";
+                    var file = data.Materialize(rel);
+                    if (file != null) paths.Add(file); else lost.Add($"{sex}{part}_1.nif");
+                }
+                return (paths, lost);
+            });
+            await AddNifsAsync(found);
+            Status($"Added {string.Join(", ", found.Select(Path.GetFileName))} from your load order."
+                   + (missing.Count > 0 ? $" Not found: {string.Join(", ", missing)}." : "") + " Add your head mesh with Add NIFs….");
+        }
+        catch (Exception ex)
+        {
+            Status("Couldn't read the MO2 setup: " + ex.Message);
+        }
+    }
+
     private async void OnClearNifs(object sender, RoutedEventArgs e)
     {
         _nifs.Clear();
