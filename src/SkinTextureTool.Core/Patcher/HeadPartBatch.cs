@@ -9,7 +9,7 @@ namespace SkinTextureTool.Core.Patcher;
 
 /// <summary>
 /// The player-head side of the load order patcher: every playable face head part's mesh is reshaped to meet its
-/// race's body (with the extra neck-edge vertices merged), and every .tri built for that mesh is patched to
+/// race's body (extra neck-edge vertices aligned onto the body's edge), and every .tri built for that mesh is patched to
 /// match, wherever it lives: the head part's own morphs and any RaceMenu slider pack under facegenmorphs. A .tri
 /// counts as built for the mesh when its stored base shape is the mesh's. Output goes to game paths.
 /// </summary>
@@ -50,7 +50,7 @@ public static class HeadPartBatch
             if (head == null) { lines.Add($"{mesh}: no head shape"); continue; }
 
             // the body of the first race the part is for, at full weight (the engine slims player heads with
-            // SkinnyMorph, whose offsets merged vertices share with their partners)
+            // SkinnyMorph, which the .tri files keep as they are)
             var bodyPath = parts.Select(p => BodyForPart(p, female, cache, patcher)).FirstOrDefault(b => b != null);
             var body = bodyPath == null ? null : patcher.LoadBody(bodyPath, 1f);
             if (body == null) { lines.Add($"{mesh}: no body found for its races"); continue; }
@@ -90,7 +90,7 @@ public static class HeadPartBatch
                 else patched++;
             }
             tris += patched;
-            lines.Add($"{mesh} ({(female ? "female" : "male")}, {parts.Count} head part(s)): seam {fit.SeamVertices} vertices, {fit.Merges.Count} merged, against {Path.GetFileName(bodyPath)}; {patched} .tri file(s)");
+            lines.Add($"{mesh} ({(female ? "female" : "male")}, {parts.Count} head part(s)): seam {fit.SeamVertices} vertices, against {Path.GetFileName(bodyPath)}; {patched} .tri file(s)");
         }
         if (beastSkipped > 0) lines.Insert(0, $"{beastSkipped} beast-race head part(s) left alone.");
         return new Outcome(byMesh.Count, written, tris, lines);

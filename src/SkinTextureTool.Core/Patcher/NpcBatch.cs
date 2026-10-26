@@ -106,10 +106,9 @@ public static class NpcBatch
             try
             {
                 // last resort: without pinning a head vertex onto body vertices it has no partner for
-                foreach (var (b, merge, pin) in new[] { (band, true, true), (band * 0.6f, true, true), (band * 0.35f, true, true), (band * 0.15f, true, true),
-                             (band * 0.35f, false, true), (band * 0.12f, false, true), (band, true, false), (band * 0.35f, false, false) })
+                foreach (var (b, pin) in new[] { (band, true), (band * 0.6f, true), (band * 0.35f, true), (band * 0.15f, true), (band, false), (band * 0.35f, false) })
                 {
-                    o = patcher.Fit(npc, b, merge ? null : new Dictionary<int, int>(), pin);
+                    o = patcher.Fit(npc, b, null, pin);
                     if (o.Skipped != null) break;
                     folds = Folds(o.Head.Positions, o.Patched, o.Head.Indices, o.Merges);
                     if (folds == 0) { if (b < band) gentler++; break; }
@@ -128,7 +127,7 @@ public static class NpcBatch
                 continue;
             }
             fitted++;
-            if (o.Merges is { Count: > 0 }) merged++;
+
             largest = Math.Max(largest, o.LargestMove);
             Count(byPlugin, npc.FormKey.ModKey.FileName);
             if (outputFull != null)
@@ -138,7 +137,7 @@ public static class NpcBatch
             }
         }
         if (beastNpcs > 0) notes.Insert(0, $"{beastNpcs} beast-race NPCs (Khajiit, Argonian…) left alone.");
-        notes.Insert(0, $"{merged} heads had their extra neck vertices merged into body-matching neighbours (no T-junctions left).");
+        notes.Insert(0, "Extra neck-edge vertices are aligned exactly onto the body's neck edge.");
         foreach (var m in mo2.SkippedOutputMods) notes.Insert(0, $"Not read as input (holds this tool's output): {m}");
         if (gentler > 0) notes.Insert(0, $"{gentler} heads needed a shorter bend to avoid folding a triangle.");
         return new Summary(npcs, fitted, written, skipped, byPlugin, folded, largest, DateTime.Now - started, notes) { Heads = heads, Limbs = limbs };

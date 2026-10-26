@@ -107,7 +107,7 @@ public sealed class FaceGenPatcher
         if (body == null) return Skip($"body {bodyPath} couldn't be read");
         var head = BodyMesh.Load(file).Where(s => s.ModelSpaceNormals).MaxBy(s => s.VertexCount);
         if (head == null) return Skip("no head shape in the FaceGen file");
-        var merge = only == null || only.Count > 0;
+        var merge = only != null && only.Count > 0; // extra neck vertices are aligned onto the body's edge, not merged
         var r = NeckReshaper.Reshape(head, body, band, merge: merge, only: only, pinUncovered: pinUncovered);
         if (r.SeamVertices < 12) return Skip($"neck doesn't meet the body ({r.SeamVertices} edge vertices on it)", head);
         return new Outcome(name, faceGen, bodyPath, weight, r.SeamVertices, r.MovedVertices, r.LargestMove, head, r.Positions, body, null, r.Merges);

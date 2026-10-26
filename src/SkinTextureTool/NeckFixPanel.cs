@@ -125,7 +125,7 @@ public sealed class NeckFixPanel : StackPanel
                 _info.Text = $"{head.Name}'s neck edge doesn't touch {body.Name}'s neck edge, so there's nothing to fix. Are they built for each other?";
                 return;
             }
-            _info.Text = $"Moved {result.MovedVertices} vertices ({result.SeamVertices} on the seam, {result.Merges.Count} merged into a neighbour so the edge matches the body's points; at most {result.LargestMove:0.00} units).\n"
+            _info.Text = $"Moved {result.MovedVertices} vertices ({result.SeamVertices} on the seam, extra edge vertices aligned onto the body's edge; at most {result.LargestMove:0.00} units).\n"
                        + $"Wrote {Path.GetRelativePath(output, report.NifPath)}\n"
                        + $"and {report.TriPaths.Count} .tri file(s):\n  " + string.Join("\n  ", report.TriPaths.Select(p => Path.GetRelativePath(output, p)))
                        + (report.Skipped.Count > 0 ? "\nSkipped:\n  " + string.Join("\n  ", report.Skipped) : "")

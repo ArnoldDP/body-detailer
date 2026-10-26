@@ -23,7 +23,7 @@ public static class NeckReshaper
     /// <param name="projectToPlane">Bend onto the body's surface plane instead of straight on (better for hands and feet).</param>
     /// <param name="only">When given, merge exactly these pairs (where they're still valid) instead of choosing:
     /// heads sharing .tri files must all merge the same vertices.</param>
-    public static Result Reshape(ShapeData head, ShapeData body, float band = 4f, float reach = 0.1f, bool merge = true,
+    public static Result Reshape(ShapeData head, ShapeData body, float band = 4f, float reach = 0.1f, bool merge = false,
         IReadOnlyDictionary<int, int>? only = null, bool projectToPlane = false, bool pinUncovered = true)
     {
         var hp = head.Positions; var bp = body.Positions;
@@ -150,11 +150,10 @@ public static class NeckReshaper
             else if (merges.TryGetValue(v, out var into)) np = anchorPos[into];
             else if (seamSet.Contains(v))
             {
-                // part-way along a body edge (a T-junction): tucked a hair under the edge so the head overlaps it
-                // and no pixel cracks show
-                var (_, target, up) = seam.First(s => s.V == v);
-                var j = bodyEdgeVerts.MinBy(j => (V(bp, j) - target).LengthSq);
-                np = target - up * 0.03f - bodyNormal[j] * 0.015f;
+                // part-way along a body edge (a T-junction): aligned exactly onto the body's edge. It moves straight
+                // across to the edge rather than along it, so its UVs barely shift (sliding it onto a neighbour, as
+                // merging did, stretched the texture), and every .tri stays valid without copying offsets
+                np = seam.First(s => s.V == v).Target;
             }
             else if (weights > 0 && nearest < band)
             {
