@@ -102,6 +102,8 @@ internal static class Shaders
         // (strand length, spread, normal strength, light belly), (stripes, stripe scale, spots, spot scale)
         uniform vec3 uFurColor, uFurPatternColor, uFurBellyColor; uniform vec4 uFur, uFur2, uFur3;
         uniform sampler2D mFur; uniform int hFur;
+        // body hair: colour; (enabled, skin darkening, density, strand length), (curl, lean in/out, sparseness, -)
+        uniform vec3 uHairColor; uniform vec4 uHair, uHair2;
         // anatomical veins: their painted network (a soft tube profile), colour, (strength, bump, enabled)
         uniform sampler2D uAnatNet; uniform int hAnatNet; uniform vec3 uAnatColor, uAnat;
         uniform vec4 uMaterial; uniform vec3 uSssColor; // spec, specVariation, subsurface, -
@@ -252,6 +254,29 @@ internal static class Shaders
                 shell = vec4(clamp(fur, 0.0, 1.0), clamp(mix(0.5, strandHeight, fade) * cover, 0.0, 1.0));
             }
 
+            // body hair over the whole surface (regions and their masks confine it): long stretched strands running
+            // down the body, leaning in or out, twisted by a slow noise for curl
+            if (uHair.x > 0.5) {
+                vec3 n = normalize(vNrm);
+                vec3 dir = normalize(vec3(sign(vPos.x + 1e-4) * uHair2.y, 0.0, -1.0));
+                float twist = fbm(p * 0.35 + 211.0, 2) * 3.0 * uHair2.x;
+                vec3 flow = dir - n * dot(dir, n);
+                flow = length(flow) > 1e-3 ? normalize(flow) : normalize(cross(n, vec3(1, 0, 0)));
+                vec3 side = normalize(cross(n, flow));
+                flow = normalize(flow * cos(twist) + side * sin(twist));
+                side = normalize(cross(n, flow));
+                float hairFreq = min(7.0 * uHair.z, 1.0 / max(2.5 * uScale * uFootprint, 1e-6));
+                vec3 hq = vec3(dot(vPos, flow) / uHair.w, dot(vPos, side), dot(vPos, n)) * (hairFreq * uScale);
+                vec3 hc = voronoi(hq + 223.0);
+                float strand = smoothstep(0.9, 0.0, hc.x);
+                float present = step(uHair2.z, hc.z);
+                float hairHeight = mix(0.55, 1.0, hc.z) * strand * present;
+                col = mix(col, col * mix(vec3(1.0), uHairColor * 2.2, 0.85), uHair.y * 0.6 * (1.0 - uHair2.z * 0.5));
+                col = mix(col, uHairColor, uHair.y * hairHeight * 0.5);
+                height -= (1.0 - strand) * present * 0.002;
+                if (hairHeight > shell.a) shell = vec4(clamp(uHairColor * (0.85 + 0.3 * hc.z), 0.0, 1.0), hairHeight);
+            }
+
             float spec = uMaterial.x * (1.0 - uMaterial.y * (0.5 + 0.5 * fbm(p * 0.2 + 131.0, 3)));
             if (hExSpec == 1) spec = mix(spec, texture(uExSpec, vUv).r, uExMix.y);
             spec *= 1.0 - poreAmount * 0.5;
@@ -326,6 +351,19 @@ internal static class Shaders
                 }
             }
             oNormal = vec4((result * 0.5 + 0.5).xzy, 1.0);
+        }
+        """;
+
+    /// <summary>A region's fur/hair shell blended over the base shell through its mask, strand heights included.</summary>
+    public const string ShellBlend = """
+        #version 330 core
+        in vec2 vUv;
+        layout(location=0) out vec4 o0;
+        uniform sampler2D uBase, uRegion, uMask; uniform float uStrength;
+        void main() {
+            ivec2 c = ivec2(gl_FragCoord.xy);
+            float w = clamp(texture(uMask, vUv).r * uStrength, 0.0, 1.0);
+            o0 = mix(texelFetch(uBase, c, 0), texelFetch(uRegion, c, 0), w);
         }
         """;
 

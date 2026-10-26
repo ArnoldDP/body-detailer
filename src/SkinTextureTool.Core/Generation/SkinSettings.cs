@@ -128,6 +128,37 @@ public sealed class AnatomicalVeinsLayer : Layer
 }
 
 /// <summary>
+/// Body hair over the whole surface it's enabled for: turn it on inside a region and that region's mask confines it
+/// (pubic hair, armpits, legs…), each region with its own density, length, colour and direction. It darkens the skin a
+/// little (stubble) and goes into the Bottled Shaders shell texture (name_shell.dds) with the fur.
+/// </summary>
+public sealed class BodyHairLayer : Layer
+{
+    public BodyHairLayer() => Enabled = false;
+    public Rgb Color { get; set; } = Rgb.FromHex("#3A2A1F");
+    /// <summary>How much the hair darkens the skin underneath in the diffuse (the stubble look).</summary>
+    [Range(0, 1)] public float SkinDarkening { get; set; } = 0.35f;
+    [Range(0.3f, 3)] public float Density { get; set; } = 1f;
+    /// <summary>How stretched strands are along their direction.</summary>
+    [Range(1, 10)] public float StrandLength { get; set; } = 5f;
+    /// <summary>How much strands twist about (curly pubic hair at the top end).</summary>
+    [Range(0, 1)] public float Curl { get; set; } = 0.6f;
+    /// <summary>Direction: strands run down the body, leaning in towards the centre line (negative) or out (positive).</summary>
+    [Range(-1, 1)] public float LeanInOut { get; set; } = 0f;
+    /// <summary>How sparse the hair is: 0 a full covering, 1 scattered strands.</summary>
+    [Range(0, 1)] public float Sparseness { get; set; } = 0.2f;
+
+    // Bottled Shaders shells, used when the Fur layer is off (with fur on, its shell settings apply)
+    public bool ExportShells { get; set; } = true;
+    [Range(1, 32)] public int ShellCount { get; set; } = 16;
+    [Range(0, 4)] public float ShellLength { get; set; } = 1.6f;
+    [Range(0, 1)] public float Droop { get; set; } = 0.6f;
+    [Range(0, 1)] public float RootDarkening { get; set; } = 0.8f;
+    [Range(0, 8000)] public float FadeStart { get; set; } = 700f;
+    [Range(0, 8000)] public float FadeEnd { get; set; } = 2500f;
+}
+
+/// <summary>
 /// Procedural fur: colour, patterns and strands in the regular textures, plus an optional shell texture
 /// (name_shell.dds next to the diffuse, with name_shell.json) for Bottled Shaders' fur shells. A mask per texture
 /// sets where fur grows (white = fur).
@@ -270,6 +301,7 @@ public sealed class SkinSettings
     public VeinsLayer Veins { get; set; } = new();
     public AnatomicalVeinsLayer AnatomicalVeins { get; set; } = new();
     public FurLayer Fur { get; set; } = new();
+    public BodyHairLayer BodyHair { get; set; } = new();
     public MaterialLayer Material { get; set; } = new();
     public NormalLayer Normals { get; set; } = new();
 

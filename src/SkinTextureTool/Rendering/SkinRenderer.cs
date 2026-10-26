@@ -33,7 +33,7 @@ internal sealed class SkinRenderer
         public int Albedo, Height, Spec, Sss, Normal, Rfaos;
         public int AlbedoB, SpecB, SssB, NormalB, RfaosB, HeightB;
         public int AlbedoT, HeightT, SpecT, SssT, RfaosT; // a region's layers before blending
-        public int Shell; // fur shell texture (fur colour, strand height in alpha)
+        public int Shell, ShellB, ShellT; // fur/hair shell texture (colour, strand height in alpha), its swap and a region's
         public bool HasShell;
         public bool Ready;
         /// <summary>The meshes' current textures, uploaded when "start from existing" is on (0 when absent).</summary>
@@ -43,11 +43,11 @@ internal sealed class SkinRenderer
         public IEnumerable<int> All => new[]
         {
             Albedo, Height, Spec, Sss, Normal, Rfaos, AlbedoB, SpecB, SssB, NormalB, RfaosB, HeightB,
-            AlbedoT, HeightT, SpecT, SssT, RfaosT, Shell,
+            AlbedoT, HeightT, SpecT, SssT, RfaosT, Shell, ShellB, ShellT,
         };
     }
 
-    private GlProgram? _generate, _bake, _bleed, _preview, _composite, _shell;
+    private GlProgram? _generate, _bake, _bleed, _preview, _composite, _shell, _shellBlend;
     private readonly List<Group> _groups = new();
     private int _emptyVao;
     private float _footprint = 0.05f;
@@ -70,6 +70,7 @@ internal sealed class SkinRenderer
         if (_generate != null) return;
         _generate = new GlProgram(Shaders.UvVertex, Shaders.Generate);
         _shell = new GlProgram(Shaders.UvVertex, Shaders.GenerateShell);
+        _shellBlend = new GlProgram(Shaders.ScreenVertex, Shaders.ShellBlend);
         _bake = new GlProgram(Shaders.UvVertex, Shaders.BakeNormals);
         _bleed = new GlProgram(Shaders.ScreenVertex, Shaders.Bleed);
         _preview = new GlProgram(Shaders.PreviewVertex, Shaders.PreviewFragment);
@@ -183,6 +184,8 @@ internal sealed class SkinRenderer
         g.SssT = Target(size, PixelInternalFormat.Rgba8);
         g.RfaosT = Target(size, PixelInternalFormat.Rgba8);
         g.Shell = Target(size, PixelInternalFormat.Rgba8);
+        g.ShellB = Target(size, PixelInternalFormat.Rgba8);
+        g.ShellT = Target(size, PixelInternalFormat.Rgba8);
     }
 
     private static int Target(int size, PixelInternalFormat format)
@@ -315,25 +318,28 @@ internal sealed class SkinRenderer
         (g.Albedo, g.Normal, g.Spec, g.Sss, g.Rfaos) = (a[0], a[1], a[2], a[3], a[4]);
         (g.AlbedoB, g.NormalB, g.SpecB, g.SssB, g.RfaosB) = (b[0], b[1], b[2], b[3], b[4]);
 
-        // 4. fur shell texture (strand heights and fur colour), from the base skin's settings
-        g.HasShell = s.Fur.Enabled;
+        // 4. fur and body hair shell texture (strand heights, fur/hair colour): the base skin's, then each region's
+        //    blended in through its mask, so hair enabled only in a region lands only there
+        var shellRegions = s.Regions.Where(r => r.Enabled && r.Strength > 0 && (r.Settings.Fur.Enabled || r.Settings.BodyHair.Enabled))
+            .Select(r => (Region: r, Mask: Image(images, r.MaskFor(g.Name)))).Where(x => x.Mask != 0).ToList();
+        g.HasShell = s.Fur.Enabled || s.BodyHair.Enabled || shellRegions.Count > 0;
         if (g.HasShell)
         {
-            BindTargets(g.Shell);
-            GL.ClearColor(0, 0, 0, 0);
-            GL.Clear(ClearBufferMask.ColorBufferBit);
-            _shell!.Use();
-            SetLayerUniforms(_shell, s);
-            _shell.Set("uFootprint", _footprint);
-            var unit = 0;
-            foreach (var (name, layer) in Masks)
+            RenderShell(g, s, images, g.Shell);
+            foreach (var (region, mask) in shellRegions)
             {
-                var tex = Image(images, layer(s).MaskFor(g.Name));
-                _shell.Texture("m" + name, unit++, tex);
-                _shell.Set("h" + name, tex != 0 ? 1 : 0);
+                RenderShell(g, region.Settings, images, g.ShellT);
+                BindTargets(g.ShellB);
+                _shellBlend!.Use();
+                _shellBlend.Texture("uBase", 0, g.Shell);
+                _shellBlend.Texture("uRegion", 1, g.ShellT);
+                _shellBlend.Texture("uMask", 2, mask);
+                _shellBlend.Set("uStrength", region.Strength);
+                GL.BindVertexArray(_emptyVao);
+                GL.DrawArrays(PrimitiveType.Triangles, 0, 3);
+                GL.BindVertexArray(0);
+                (g.Shell, g.ShellB) = (g.ShellB, g.Shell);
             }
-            _shell.Set("hExAlbedo", 0); _shell.Set("hExSpec", 0); _shell.Set("hExSss", 0);
-            DrawShapes(g);
             GL.BindTexture(TextureTarget.Texture2D, g.Shell);
             GL.GenerateMipmap(GenerateMipmapTarget.Texture2D);
             GL.TexParameter(TextureTarget.Texture2D, TextureParameterName.TextureMinFilter, (int)TextureMinFilter.LinearMipmapLinear);
@@ -346,6 +352,26 @@ internal sealed class SkinRenderer
             GL.TexParameter(TextureTarget.Texture2D, TextureParameterName.TextureMinFilter, (int)TextureMinFilter.LinearMipmapLinear);
         }
         g.Ready = true;
+    }
+
+    /// <summary>Renders the fur/body hair shell texture for one set of settings into a target.</summary>
+    private void RenderShell(Group g, SkinSettings s, IReadOnlyDictionary<string, int> images, int target)
+    {
+        BindTargets(target);
+        GL.ClearColor(0, 0, 0, 0);
+        GL.Clear(ClearBufferMask.ColorBufferBit);
+        _shell!.Use();
+        SetLayerUniforms(_shell, s);
+        _shell.Set("uFootprint", _footprint);
+        var unit = 0;
+        foreach (var (name, layer) in Masks)
+        {
+            var tex = Image(images, layer(s).MaskFor(g.Name));
+            _shell.Texture("m" + name, unit++, tex);
+            _shell.Set("h" + name, tex != 0 ? 1 : 0);
+        }
+        _shell.Set("hExAlbedo", 0); _shell.Set("hExSpec", 0); _shell.Set("hExSss", 0); _shell.Set("hAnatNet", 0);
+        DrawShapes(g);
     }
 
     /// <summary>Runs the skin layers with <paramref name="s"/> (and its layer masks) into the given targets.</summary>
@@ -412,6 +438,10 @@ internal sealed class SkinRenderer
         p.Set("uFur", new Vector4(f.Enabled ? 1 : 0, f.ColorStrength, f.ColorVariation, f.Density));
         p.Set("uFur2", new Vector4(f.StrandLength, f.Spread, f.NormalStrength, f.LightBelly));
         p.Set("uFur3", new Vector4(f.Stripes, f.StripeScale, f.Spots, f.SpotScale));
+        var h = s.BodyHair;
+        p.Set("uHairColor", C(h.Color));
+        p.Set("uHair", new Vector4(h.Enabled ? 1 : 0, h.SkinDarkening, h.Density, h.StrandLength));
+        p.Set("uHair2", new Vector4(h.Curl, h.LeanInOut, h.Sparseness, 0));
         p.Set("uMaterial", new Vector4(s.Material.Specular, s.Material.SpecularVariation, s.Material.Enabled ? s.Material.Subsurface : 0f, 0));
         p.Set("uSssColor", C(s.Material.SubsurfaceColor));
         p.Set("uPbr", new Vector4(s.Material.Roughness, s.Material.RoughnessVariation, s.Material.Enabled ? s.Material.Fuzz : 0f, s.Material.CavityOcclusion));
