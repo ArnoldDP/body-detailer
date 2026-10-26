@@ -278,6 +278,8 @@ internal static class Shaders
         uniform sampler2D uDetailMap; uniform int uHasDetailMap; uniform float uDetailMapStrength; uniform int uZCorrection;
         // an existing model-space normal map to start from instead of the bare mesh normal
         uniform sampler2D uExNormal; uniform int hExNormal; uniform float uExNormalMix;
+        // fur lean: tilt towards the fur flow (down the body, out from the spine by 'spread') where the fur mask allows
+        uniform float uFurLean, uFurSpread; uniform sampler2D mFur; uniform int hFur;
 
         float h(vec2 uv, float centre) { vec4 s = texture(uHeight, uv); return s.a > 0.5 ? s.r : centre; }
 
@@ -308,6 +310,14 @@ internal static class Shaders
             }
 
             vec3 result = normalize(tbn * detail);
+            if (uFurLean > 0.0) {
+                vec3 flow = vec3(0.0, 0.0, -1.0) + vec3(sign(vPos.x + 1e-4), 0.0, 0.0) * uFurSpread * 1.5;
+                flow = flow - n * dot(flow, n);
+                if (length(flow) > 1e-3) {
+                    float cover = hFur == 1 ? texture(mFur, vUv).r : 1.0;
+                    result = normalize(result + normalize(flow) * uFurLean * 0.7 * cover);
+                }
+            }
             oNormal = vec4((result * 0.5 + 0.5).xzy, 1.0);
         }
         """;

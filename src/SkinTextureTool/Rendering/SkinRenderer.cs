@@ -290,6 +290,11 @@ internal sealed class SkinRenderer
         _bake.Texture("uExNormal", 2, exNormal);
         _bake.Set("hExNormal", exNormal != 0 ? 1 : 0);
         _bake.Set("uExNormalMix", s.StartFromExisting.NormalMap);
+        _bake.Set("uFurLean", s.Fur.Enabled ? s.Fur.Lean : 0f);
+        _bake.Set("uFurSpread", s.Fur.Spread);
+        var furMask = Image(images, s.Fur.MaskFor(g.Name));
+        _bake.Texture("mFur", 3, furMask);
+        _bake.Set("hFur", furMask != 0 ? 1 : 0);
         DrawShapes(g);
 
         // 3. bleed past island edges, ping-ponging between the two texture sets

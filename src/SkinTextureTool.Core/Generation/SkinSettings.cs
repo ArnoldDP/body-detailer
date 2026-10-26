@@ -122,6 +122,12 @@ public sealed class FurLayer : Layer
     [Range(0, 1)] public float Spread { get; set; } = 0.35f;
     /// <summary>Strand grooves in the normal map.</summary>
     [Range(0, 1)] public float NormalStrength { get; set; } = 0.4f;
+    /// <summary>
+    /// Tilts the normal map towards the fur direction where fur grows. Bottled Shaders grows the shells along the
+    /// normal map (read at a low mip), so this is what makes the fur lie down its flow. It also shades the skin,
+    /// so keep it subtle.
+    /// </summary>
+    [Range(0, 1)] public float Lean { get; set; } = 0.25f;
     public Rgb PatternColor { get; set; } = Rgb.FromHex("#3C3028");
     [Range(0, 1)] public float Stripes { get; set; } = 0f;
     [Range(0.2f, 4)] public float StripeScale { get; set; } = 1f;
