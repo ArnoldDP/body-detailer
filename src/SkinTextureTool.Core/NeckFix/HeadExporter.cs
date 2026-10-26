@@ -22,31 +22,7 @@ public static class HeadExporter
         var nifOut = Path.Combine(outputRoot, relative);
         Directory.CreateDirectory(Path.GetDirectoryName(nifOut)!);
 
-        // positions back into the shape's own vertex space, which the NIF and the .tri files store
-        float[] local;
-        using (var nif = new NifFile())
-        {
-            if (nif.Load(head.NifPath) != 0) throw new InvalidDataException($"Couldn't read {head.NifPath}.");
-            var shape = nif.GetShapes().FirstOrDefault(s => s.name.get() == head.Name)
-                ?? throw new InvalidDataException($"{head.Name} isn't in {head.NifPath}.");
-            var toSkin = new MatTransform();
-            if (!nif.GetShapeTransformGlobalToSkin(shape, toSkin)) toSkin = shape.transform.InverseTransform();
-            var verts = new vectorVector3();
-            local = new float[positions.Length];
-            for (var i = 0; i < positions.Length; i += 3)
-            {
-                var p = toSkin.ApplyTransform(new Vector3(positions[i], positions[i + 1], positions[i + 2]));
-                verts.Add(p);
-                local[i] = p.x; local[i + 1] = p.y; local[i + 2] = p.z;
-            }
-            nif.SetVertsForShape(shape, verts);
-            if (merges is { Count: > 0 }) CopyWeights(nif, shape, merges);
-            // normals only: the head uses a model-space normal map, and the merged (zero-area) triangles would
-            // give meaningless tangents
-            nif.CalcNormalsForShape(shape);
-            nif.UpdateSkinPartitions(shape);
-            if (nif.Save(nifOut) != 0) throw new IOException($"Couldn't write {nifOut}.");
-        }
+        var local = WriteNif(head.NifPath, head.Name, positions, nifOut, merges);
 
         // every .tri in the head's mod built for these vertices: next to the head, and the expression and slider
         // morphs under facegenmorphs. Only ones named for this head (female/male) are touched.
@@ -67,6 +43,38 @@ public static class HeadExporter
     }
 
     /// <summary>"meshes\...\file.nif" from a full path, or null if there's no meshes folder in it.</summary>
+    /// <summary>
+    /// Writes <paramref name="sourceNif"/> to <paramref name="target"/> with one shape's vertices moved (positions
+    /// in the space BodyMesh loads), merged vertices given their partner's weights, and normals recalculated.
+    /// Returns the positions in the shape's own vertex space, as .tri files store them.
+    /// </summary>
+    public static float[] WriteNif(string sourceNif, string shapeName, float[] positions, string target, IReadOnlyDictionary<int, int>? merges = null)
+    {
+        Directory.CreateDirectory(Path.GetDirectoryName(target)!);
+        using var nif = new NifFile();
+        if (nif.Load(sourceNif) != 0) throw new InvalidDataException($"Couldn't read {sourceNif}.");
+        var shape = nif.GetShapes().FirstOrDefault(s => s.name.get() == shapeName)
+            ?? throw new InvalidDataException($"{shapeName} isn't in {sourceNif}.");
+        var toSkin = new MatTransform();
+        if (!nif.GetShapeTransformGlobalToSkin(shape, toSkin)) toSkin = shape.transform.InverseTransform();
+        var verts = new vectorVector3();
+        var local = new float[positions.Length];
+        for (var i = 0; i < positions.Length; i += 3)
+        {
+            var p = toSkin.ApplyTransform(new Vector3(positions[i], positions[i + 1], positions[i + 2]));
+            verts.Add(p);
+            local[i] = p.x; local[i + 1] = p.y; local[i + 2] = p.z;
+        }
+        nif.SetVertsForShape(shape, verts);
+        if (merges is { Count: > 0 }) CopyWeights(nif, shape, merges);
+        // normals only: heads use model-space normal maps, and merged (zero-area) triangles would give
+        // meaningless tangents
+        nif.CalcNormalsForShape(shape);
+        nif.UpdateSkinPartitions(shape);
+        if (nif.Save(target) != 0) throw new IOException($"Couldn't write {target}.");
+        return local;
+    }
+
     /// <summary>
     /// Gives each merged vertex its partner's bone weights, so the two move together when animated. Skyrim SE
     /// keeps weights in the triangle shape's vertex data, which the wrapper only exposes on the concrete type.

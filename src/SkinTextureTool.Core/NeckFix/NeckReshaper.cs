@@ -15,13 +15,19 @@ public static class NeckReshaper
     public sealed record Result(float[] Positions, int MovedVertices, int SeamVertices, float LargestMove, IReadOnlyDictionary<int, int> Merges);
 
     /// <param name="band">Height in world units over which the head is bent to continue the body.</param>
-    public static Result Reshape(ShapeData head, ShapeData body, float band = 4f, float reach = 0.1f)
+    /// <param name="merge">
+    /// Merge in-between edge vertices into their matching neighbours (needs the head's .tri files patched to
+    /// match, as the player export does). Off, they're snapped onto the body's edge and tucked a hair under it
+    /// instead, which leaves every .tri valid — the choice for NPC FaceGen heads.
+    /// </param>
+    public static Result Reshape(ShapeData head, ShapeData body, float band = 4f, float reach = 0.1f, bool merge = true)
     {
         var hp = head.Positions; var bp = body.Positions;
         var headEdges = BoundaryEdges(head);
         var bodyEdges = BoundaryEdges(body);
         var bodyEdgeVerts = bodyEdges.SelectMany(e => new[] { e.A, e.B }).Distinct().ToList();
         var bodyTangent = EdgeTangents(body, bodyEdgeVerts);
+        var bodyNormal = VertexNormals(body);
 
         (Vec Target, Vec Up, float Dist) Nearest(Vec p)
         {
@@ -61,6 +67,23 @@ public static class NeckReshaper
             var j = bodyEdgeVerts.MinBy(j => (V(bp, j) - p).LengthSq);
             if ((V(bp, j) - p).LengthSq < match * match) anchorPos[v] = V(bp, j);
         }
+        // Body edge vertices along the seam that no head vertex sits on would leave the head's edge cutting the
+        // corner past them (a sliver gap): pin the nearest free seam vertex onto each.
+        var covered = anchorPos.Values.ToList();
+        var headEdgeVerts = headEdges.SelectMany(e => new[] { e.A, e.B }).Distinct().ToList();
+        foreach (var j in bodyEdgeVerts)
+        {
+            var bj = V(bp, j);
+            if (covered.Any(c => (c - bj).LengthSq < match * match)) continue;
+            // only where the seam runs: a body vertex beside the head's neck, not elsewhere on the body's edge
+            if (!seam.Any(x => (x.Target - bj).LengthSq < 1f)) continue;
+            var near = headEdgeVerts.Where(v => !anchorPos.ContainsKey(v))
+                .OrderBy(v => (V(hp, v) - bj).LengthSq).Cast<int?>().FirstOrDefault();
+            if (near is not { } v || (V(hp, v) - bj).LengthSq > 0.3f * 0.3f) continue;
+            anchorPos[v] = bj;
+            covered.Add(bj);
+            if (!seam.Any(x => x.V == v)) seam.Add((v, bj, Nearest(bj).Up));
+        }
         var seamVerts = seam.Select(x => x.V).ToHashSet();
         var along = new Dictionary<int, List<int>>();
         foreach (var (a, b) in headEdges)
@@ -88,6 +111,7 @@ public static class NeckReshaper
             }
             if (found is { } anchor) merges[v] = anchor;
         }
+        if (!merge) merges.Clear();
 
         var moved = 0; var largest = 0f;
         var seamSet = seam.Select(s => s.V).ToHashSet();
@@ -107,7 +131,14 @@ public static class NeckReshaper
             Vec np;
             if (anchorPos.TryGetValue(v, out var exact)) np = exact;
             else if (merges.TryGetValue(v, out var into)) np = anchorPos[into];
-            else if (seamSet.Contains(v)) np = seam.First(s => s.V == v).Target;
+            else if (seamSet.Contains(v))
+            {
+                // part-way along a body edge (a T-junction): tucked a hair under the edge so the head overlaps it
+                // and no pixel cracks show
+                var (_, target, up) = seam.First(s => s.V == v);
+                var j = bodyEdgeVerts.MinBy(j => (V(bp, j) - target).LengthSq);
+                np = target - up * 0.03f - bodyNormal[j] * 0.015f;
+            }
             else if (weights > 0 && nearest < band)
             {
                 var s = nearest / band;
@@ -163,6 +194,20 @@ public static class NeckReshaper
             result[v] = dir.Normalized();
         }
         return result;
+    }
+
+    private static Vec[] VertexNormals(ShapeData s)
+    {
+        var n = new Vec[s.VertexCount]; var P = s.Positions; var I = s.Indices;
+        for (var t = 0; t + 2 < I.Length; t += 3)
+        {
+            int a = (int)I[t], b = (int)I[t + 1], c = (int)I[t + 2];
+            var e1 = V(P, b) - V(P, a); var e2 = V(P, c) - V(P, a);
+            var f = new Vec(e1.Y * e2.Z - e1.Z * e2.Y, e1.Z * e2.X - e1.X * e2.Z, e1.X * e2.Y - e1.Y * e2.X);
+            n[a] += f; n[b] += f; n[c] += f;
+        }
+        for (var i = 0; i < n.Length; i++) n[i] = n[i].Normalized();
+        return n;
     }
 
     private static Vec V(float[] a, int i) => new(a[i * 3], a[i * 3 + 1], a[i * 3 + 2]);
