@@ -14,6 +14,8 @@
                         ToolTip="Loads the femalebody_1, femalehands_1 and femalefeet_1 meshes your MO2 load order uses (the winning copies), so only the head is left to add"/>
                 <Button Content="Add male body" Padding="10,4" Margin="6,0,0,0" Click="OnAddMaleBody"
                         ToolTip="Loads the malebody_1, malehands_1 and malefeet_1 meshes your MO2 load order uses (the winning copies), so only the head is left to add"/>
+                <Button Content="Load NPC…" Padding="10,4" Margin="6,0,0,0" Click="OnLoadNpc"
+                        ToolTip="Loads an NPC's FaceGen head and the body, hands and feet of the skin it wears, with its own textures, so you can make textures for that NPC"/>
                 <Button Content="Clear meshes" Padding="10,4" Margin="6,0,0,0" Click="OnClearNifs"/>
                 <Button Content="Load preset…" Padding="10,4" Margin="18,0,0,0" Click="OnLoadPreset"/>
                 <Button Content="Save preset…" Padding="10,4" Margin="6,0,0,0" Click="OnSavePreset"/>
@@ -69,6 +71,9 @@
                         <Button DockPanel.Dock="Right" Content="…" Width="26" Margin="4,0,0,0" Click="OnBrowseExport"/>
                         <TextBox x:Name="ExportFolderBox"/>
                     </DockPanel>
+                    <CheckBox x:Name="GamePathsBox" Margin="0,6,0,0">
+                        <TextBlock TextWrapping="Wrap" Text="Export at game texture paths (textures\... exactly as the meshes use them, so the folder works as an override mod)"/>
+                    </CheckBox>
                     <CheckBox x:Name="RfaosBox" IsChecked="True" Margin="0,6,0,0">
                         <TextBlock TextWrapping="Wrap" Text="Also write _rfaos.dds (Community Shaders Advanced Skin: roughness, fuzz, AO, specular)"/>
                     </CheckBox>

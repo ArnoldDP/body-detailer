@@ -174,6 +174,84 @@ public partial class MainWindow : Window
         }
     }
 
+    private SkinTextureTool.Core.Patcher.GameSession? _session;
+    private string? _sessionFolder;
+    private List<SkinTextureTool.Core.Patcher.NpcAssets.Entry>? _npcs;
+
+    /// <summary>
+    /// Loads one NPC as the game draws it: its FaceGen head, and the body, hands and feet of the skin it wears, with
+    /// that skin's own texture set where it swaps one in. Starts from its current textures, and turns on export at
+    /// game paths so the result overrides exactly the textures it uses.
+    /// </summary>
+    private async void OnLoadNpc(object sender, RoutedEventArgs e)
+    {
+        var mo2Folder = Patcher.Mo2Folder;
+        if (!File.Exists(Path.Combine(mo2Folder, "ModOrganizer.ini")))
+        {
+            var dlg = new OpenFolderDialog { Title = "Your Mod Organizer 2 folder (the one with ModOrganizer.ini)" };
+            if (dlg.ShowDialog(this) != true) return;
+            mo2Folder = Patcher.Mo2Folder = dlg.FolderName;
+            if (!File.Exists(Path.Combine(mo2Folder, "ModOrganizer.ini"))) { Status("That folder has no ModOrganizer.ini."); return; }
+        }
+        try
+        {
+            if (_session == null || _sessionFolder != mo2Folder)
+            {
+                Status("Reading the load order's NPCs…");
+                var extract = Path.Combine(AppContext.BaseDirectory, "Extracted meshes");
+                _session?.Dispose();
+                _session = await Task.Run(() => new SkinTextureTool.Core.Patcher.GameSession(mo2Folder, extract));
+                _sessionFolder = mo2Folder;
+                _npcs = await Task.Run(() => SkinTextureTool.Core.Patcher.NpcAssets.List(_session));
+            }
+            Status($"{_npcs!.Count} NPCs in the load order.");
+            var picker = new NpcPickerWindow(_npcs) { Owner = this };
+            if (picker.ShowDialog() != true || picker.Picked is not { } npc) return;
+
+            Status($"Loading {npc.Name}…");
+            var session = _session;
+            var (loaded, notes) = await Task.Run(() =>
+            {
+                var pieces = SkinTextureTool.Core.Patcher.NpcAssets.Pieces(session, npc, out var n);
+                var shapesByFile = new List<(string Path, List<ShapeData> Shapes)>();
+                foreach (var piece in pieces)
+                {
+                    var file = session.Data.Materialize(piece.MeshPath);
+                    if (file == null) { n.Add($"{piece.MeshPath} not found."); continue; }
+                    var shapes = BodyMesh.Load(file);
+                    if (piece.TextureOverride is { } tex)
+                        shapes = shapes.Select(s => !s.ModelSpaceNormals ? s : new ShapeData
+                        {
+                            Name = s.Name, NifPath = s.NifPath, Positions = s.Positions, Uvs = s.Uvs, Indices = s.Indices,
+                            DiffusePath = tex[0] ?? s.DiffusePath, ModelSpaceNormals = s.ModelSpaceNormals,
+                            TexturePaths = Enumerable.Range(0, Math.Max(tex.Length, s.TexturePaths.Length))
+                                .Select(i => (i < tex.Length ? tex[i] : null) ?? (i < s.TexturePaths.Length ? s.TexturePaths[i] : null)).ToArray(),
+                        }).ToList();
+                    shapesByFile.Add((file, shapes));
+                }
+                return (shapesByFile, n);
+            });
+            _nifs.Clear();
+            _unselected.Clear();
+            foreach (var (file, shapes) in loaded)
+            {
+                foreach (var s in shapes.Where(s => !s.ModelSpaceNormals)) _unselected.Add(s);
+                _nifs.Add((file, shapes));
+            }
+            Settings.Settings.StartFromExisting.Enabled = true;
+            Settings.Settings = Settings.Settings; // refresh the panel
+            GamePathsBox.IsChecked = true;
+            await RefreshShapesAsync();
+            Preview.Frame();
+            Status($"Loaded {npc.Name}: {string.Join(", ", loaded.Select(l => Path.GetFileName(l.Path)))}. {string.Join(" ", notes)} "
+                   + "Starting from its current textures; export writes them at their game paths.");
+        }
+        catch (Exception ex)
+        {
+            Status("Couldn't load that NPC: " + ex.Message);
+        }
+    }
+
     private async void OnClearNifs(object sender, RoutedEventArgs e)
     {
         _nifs.Clear();
@@ -473,6 +551,7 @@ public partial class MainWindow : Window
             var images = new Dictionary<string, int>(_imageTextures, StringComparer.OrdinalIgnoreCase);
             var size = ExportSize;
             var rfaos = RfaosBox.IsChecked == true;
+            var gamePaths = GamePathsBox.IsChecked == true;
             var written = new List<string>();
             foreach (var group in _groups)
             {
@@ -483,22 +562,32 @@ public partial class MainWindow : Window
                     return Preview.Renderer.Read(group);
                 });
                 Status($"Compressing {group} to BC7… (this takes a while at large sizes)");
+                // where each texture goes: next to each other by group name, or at the exact game paths the meshes use
+                var shapeTextures = _groupShapes.TryGetValue(group, out var gs) ? gs.TexturePaths : Array.Empty<string?>();
+                string Out(int slot, string suffix)
+                {
+                    if (!gamePaths) return Path.Combine(folder, group + suffix);
+                    var own = slot >= 0 && slot < shapeTextures.Length ? shapeTextures[slot] : null;
+                    if (own != null) return Path.Combine(folder, GameTexturePath(own));
+                    var diffuse = shapeTextures.Length > 0 && shapeTextures[0] != null ? GameTexturePath(shapeTextures[0]!) : Path.Combine("textures", group + ".dds");
+                    return Path.Combine(folder, Path.GetDirectoryName(diffuse)!, Path.GetFileNameWithoutExtension(diffuse) + suffix);
+                }
                 await Task.Run(() =>
                 {
                     var jobs = new List<Action>
                     {
-                        () => DdsExporter.WriteBc7(Path.Combine(folder, group + ".dds"), textures.Albedo, size, size),
-                        () => DdsExporter.WriteBc7(Path.Combine(folder, group + "_msn.dds"), textures.Normal, size, size),
-                        () => DdsExporter.WriteBc7(Path.Combine(folder, group + "_s.dds"), textures.Specular, size, size),
-                        () => DdsExporter.WriteBc7(Path.Combine(folder, group + "_sk.dds"), textures.Subsurface, size, size),
+                        () => DdsExporter.WriteBc7(Out(0, ".dds"), textures.Albedo, size, size),
+                        () => DdsExporter.WriteBc7(Out(1, "_msn.dds"), textures.Normal, size, size),
+                        () => DdsExporter.WriteBc7(Out(7, "_s.dds"), textures.Specular, size, size),
+                        () => DdsExporter.WriteBc7(Out(2, "_sk.dds"), textures.Subsurface, size, size),
                     };
-                    if (rfaos) jobs.Add(() => DdsExporter.WriteBc7(Path.Combine(folder, group + "_rfaos.dds"), textures.Rfaos, size, size));
+                    if (rfaos) jobs.Add(() => DdsExporter.WriteBc7(Out(-1, "_rfaos.dds"), textures.Rfaos, size, size));
                     // Bottled Shaders fur shells: matched by name next to the diffuse
                     if (textures.Shell != null && snapshot.Fur.ExportShells)
                     {
                         var shell = FillUncovered(textures.Shell, textures.Albedo, size);
-                        jobs.Add(() => DdsExporter.WriteBc7(Path.Combine(folder, group + "_shell.dds"), shell, size, size));
-                        jobs.Add(() => File.WriteAllText(Path.Combine(folder, group + "_shell.json"), ShellJson(snapshot.Fur)));
+                        jobs.Add(() => DdsExporter.WriteBc7(Out(-1, "_shell.dds"), shell, size, size));
+                        jobs.Add(() => File.WriteAllText(Out(-1, "_shell.json"), ShellJson(snapshot.Fur)));
                     }
                     Parallel.Invoke(jobs.ToArray());
                 });
@@ -517,6 +606,13 @@ public partial class MainWindow : Window
         {
             ExportButton.IsEnabled = _meshReady;
         }
+    }
+
+    /// <summary>A texture path as the game resolves it: under textures\, backslashed.</summary>
+    private static string GameTexturePath(string texture)
+    {
+        var rel = texture.Replace('/', Path.DirectorySeparatorChar).TrimStart(Path.DirectorySeparatorChar);
+        return rel.StartsWith("textures" + Path.DirectorySeparatorChar, StringComparison.OrdinalIgnoreCase) ? rel : Path.Combine("textures", rel);
     }
 
     private static string ShellJson(FurLayer f) => JsonSerializer.Serialize(new Dictionary<string, object>
