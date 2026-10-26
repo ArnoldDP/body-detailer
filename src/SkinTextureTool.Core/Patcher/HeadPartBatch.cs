@@ -56,9 +56,9 @@ public static class HeadPartBatch
             if (body == null) { lines.Add($"{mesh}: no body found for its races"); continue; }
 
             NeckReshaper.Result? fit = null;
-            foreach (var b in new[] { band, band * 0.6f, band * 0.35f })
+            foreach (var (b, pin) in new[] { (band, true), (band * 0.6f, true), (band * 0.35f, true), (band, false), (band * 0.35f, false) })
             {
-                var r = NeckReshaper.Reshape(head, body, b);
+                var r = NeckReshaper.Reshape(head, body, b, pinUncovered: pin);
                 if (r.SeamVertices < 12) break;
                 if (NpcBatch.Folds(head.Positions, r.Positions, head.Indices, r.Merges) == 0) { fit = r; break; }
             }

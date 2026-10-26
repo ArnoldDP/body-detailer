@@ -91,7 +91,7 @@ public sealed class FaceGenPatcher
 
     /// <param name="only">Merge exactly these vertex pairs (shared by every NPC using the same .tri files); null merges
     /// whatever this head needs; an empty map merges nothing (snap and tuck).</param>
-    public Outcome Fit(INpcGetter npc, float band, IReadOnlyDictionary<int, int>? only = null)
+    public Outcome Fit(INpcGetter npc, float band, IReadOnlyDictionary<int, int>? only = null, bool pinUncovered = true)
     {
         var name = npc.EditorID ?? npc.FormKey.ToString();
         var faceGen = FaceGenPath(npc);
@@ -108,7 +108,7 @@ public sealed class FaceGenPatcher
         var head = BodyMesh.Load(file).Where(s => s.ModelSpaceNormals).MaxBy(s => s.VertexCount);
         if (head == null) return Skip("no head shape in the FaceGen file");
         var merge = only == null || only.Count > 0;
-        var r = NeckReshaper.Reshape(head, body, band, merge: merge, only: only);
+        var r = NeckReshaper.Reshape(head, body, band, merge: merge, only: only, pinUncovered: pinUncovered);
         if (r.SeamVertices < 12) return Skip($"neck doesn't meet the body ({r.SeamVertices} edge vertices on it)", head);
         return new Outcome(name, faceGen, bodyPath, weight, r.SeamVertices, r.MovedVertices, r.LargestMove, head, r.Positions, body, null, r.Merges);
     }

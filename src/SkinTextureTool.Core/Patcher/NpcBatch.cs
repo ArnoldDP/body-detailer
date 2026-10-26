@@ -105,9 +105,11 @@ public static class NpcBatch
             FaceGenPatcher.Outcome? o = null; var folds = 0;
             try
             {
-                foreach (var (b, merge) in new[] { (band, true), (band * 0.6f, true), (band * 0.35f, true), (band * 0.15f, true), (band * 0.35f, false), (band * 0.12f, false) })
+                // last resort: without pinning a head vertex onto body vertices it has no partner for
+                foreach (var (b, merge, pin) in new[] { (band, true, true), (band * 0.6f, true, true), (band * 0.35f, true, true), (band * 0.15f, true, true),
+                             (band * 0.35f, false, true), (band * 0.12f, false, true), (band, true, false), (band * 0.35f, false, false) })
                 {
-                    o = patcher.Fit(npc, b, merge ? null : new Dictionary<int, int>());
+                    o = patcher.Fit(npc, b, merge ? null : new Dictionary<int, int>(), pin);
                     if (o.Skipped != null) break;
                     folds = Folds(o.Head.Positions, o.Patched, o.Head.Indices, o.Merges);
                     if (folds == 0) { if (b < band) gentler++; break; }

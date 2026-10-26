@@ -24,7 +24,7 @@ public static class NeckReshaper
     /// <param name="only">When given, merge exactly these pairs (where they're still valid) instead of choosing:
     /// heads sharing .tri files must all merge the same vertices.</param>
     public static Result Reshape(ShapeData head, ShapeData body, float band = 4f, float reach = 0.1f, bool merge = true,
-        IReadOnlyDictionary<int, int>? only = null, bool projectToPlane = false)
+        IReadOnlyDictionary<int, int>? only = null, bool projectToPlane = false, bool pinUncovered = true)
     {
         var hp = head.Positions; var bp = body.Positions;
         var headEdges = BoundaryEdges(head);
@@ -75,7 +75,7 @@ public static class NeckReshaper
         // corner past them (a sliver gap): pin the nearest free seam vertex onto each.
         var covered = anchorPos.Values.ToList();
         var headEdgeVerts = headEdges.SelectMany(e => new[] { e.A, e.B }).Distinct().ToList();
-        foreach (var j in bodyEdgeVerts)
+        foreach (var j in pinUncovered ? bodyEdgeVerts : new List<int>())
         {
             var bj = V(bp, j);
             if (covered.Any(c => (c - bj).LengthSq < match * match)) continue;
@@ -83,7 +83,7 @@ public static class NeckReshaper
             if (!seam.Any(x => (x.Target - bj).LengthSq < 1f)) continue;
             var near = headEdgeVerts.Where(v => !anchorPos.ContainsKey(v))
                 .OrderBy(v => (V(hp, v) - bj).LengthSq).Cast<int?>().FirstOrDefault();
-            if (near is not { } v || (V(hp, v) - bj).LengthSq > 0.3f * 0.3f) continue;
+            if (near is not { } v || (V(hp, v) - bj).LengthSq > 0.6f * 0.6f) continue;
             anchorPos[v] = bj;
             covered.Add(bj);
             if (!seam.Any(x => x.V == v)) seam.Add((v, bj, Nearest(bj).Up));
@@ -98,7 +98,9 @@ public static class NeckReshaper
         }
         // the same point can be several vertices (UV seams), so walk by position
         var merges = new Dictionary<int, int>();
-        foreach (var v in seamVerts.Where(v => !anchorPos.ContainsKey(v)))
+        // only vertices lying on the body's edge between seam vertices on both sides; one beside the corner where the
+        // head's edge turns away from the body would drag the head's surface off the body's edge when merged
+        foreach (var v in seamVerts.Where(v => !anchorPos.ContainsKey(v) && (along.GetValueOrDefault(v)?.Count ?? 0) >= 2))
         {
             var dist = new Dictionary<int, float> { [v] = 0 };
             var queue = new PriorityQueue<int, float>(); queue.Enqueue(v, 0);
