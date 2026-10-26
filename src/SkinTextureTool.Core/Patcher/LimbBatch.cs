@@ -20,12 +20,12 @@ public static class LimbBatch
     private static readonly (string Name, BipedObjectFlag Flag)[] Pieces = { ("hands", BipedObjectFlag.Hands), ("feet", BipedObjectFlag.Feet) };
 
     public static Outcome Run(IEnumerable<ISkyrimModGetter> priority, ILinkCache<ISkyrimMod, ISkyrimModGetter> cache, VirtualData data,
-        FaceGenPatcher patcher, string? output, float band, Action<string>? progress)
+        FaceGenPatcher patcher, string? output, float band, Action<string>? progress, bool skipBeasts = true)
     {
         var lines = new List<string>();
         // (piece mesh, body mesh) pairs from every race's skin, each pair once
         var pairs = new SortedDictionary<string, string>(StringComparer.OrdinalIgnoreCase);
-        foreach (var race in priority.Race().WinningOverrides())
+        foreach (var race in priority.Race().WinningOverrides().Where(r => !skipBeasts || !patcher.IsBeast(r)))
             foreach (var female in new[] { true, false })
             {
                 var body = patcher.BodyPath(race, female);

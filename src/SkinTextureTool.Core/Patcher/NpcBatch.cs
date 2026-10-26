@@ -55,7 +55,8 @@ public static class NpcBatch
     /// <param name="output">Folder standing in for Data; null for a dry run.</param>
     /// <param name="band">How far up the neck heads are bent to follow the body.</param>
     /// <param name="limbBand">The same for hands and feet at the wrists and ankles; 0 leaves them alone.</param>
-    public static Summary Run(string mo2Folder, string? output, float band = 4f, Action<string>? progress = null, float limbBand = 3f)
+    /// <param name="skipBeasts">Leave Khajiit, Argonians and other beast races alone (heads, NPCs, hands and feet).</param>
+    public static Summary Run(string mo2Folder, string? output, float band = 4f, Action<string>? progress = null, float limbBand = 3f, bool skipBeasts = true)
     {
         var started = DateTime.Now;
         progress?.Invoke("Reading the MO2 instance…");
@@ -90,12 +91,14 @@ public static class NpcBatch
         // shares with other NPCs are left alone: expressions don't move the neck edge (under 0.001 units in the High
         // Poly Head expressions), and the one morph that does, SkinnyMorph, is how the engine applies weight to a
         // head built at runtime — the player's — while FaceGen heads are already baked for their NPC's weight.
-        var heads = HeadPartBatch.Run(priority, cache, data, patcher, outputFull, band, progress);
-        var limbs = limbBand > 0 ? LimbBatch.Run(priority, cache, data, patcher, outputFull, limbBand, progress) : null;
+        var heads = HeadPartBatch.Run(priority, cache, data, patcher, outputFull, band, progress, skipBeasts);
+        var limbs = limbBand > 0 ? LimbBatch.Run(priority, cache, data, patcher, outputFull, limbBand, progress, skipBeasts) : null;
+        var beastNpcs = 0;
         foreach (var npc in priority.Npc().WinningOverrides())
         {
             if (!npc.Template.IsNull && npc.Configuration.TemplateFlags.HasFlag(NpcConfiguration.TemplateFlag.Traits)) continue;
             if (!data.Exists(FaceGenPatcher.FaceGenPath(npc))) continue;
+            if (skipBeasts && patcher.IsBeast(npc)) { beastNpcs++; continue; }
             npcs++;
             if (npcs % 100 == 0) progress?.Invoke($"Fitting FaceGen heads… {npcs}");
             // a tight neck that would fold gets a gentler (shorter) bend, then no merging, before it's given up on
@@ -132,6 +135,7 @@ public static class NpcBatch
                 catch (Exception ex) { notes.Add($"{o.Npc}: couldn't write: {ex.Message}"); }
             }
         }
+        if (beastNpcs > 0) notes.Insert(0, $"{beastNpcs} beast-race NPCs (Khajiit, Argonian…) left alone.");
         notes.Insert(0, $"{merged} heads had their extra neck vertices merged into body-matching neighbours (no T-junctions left).");
         foreach (var m in mo2.SkippedOutputMods) notes.Insert(0, $"Not read as input (holds this tool's output): {m}");
         if (gentler > 0) notes.Insert(0, $"{gentler} heads needed a shorter bend to avoid folding a triangle.");

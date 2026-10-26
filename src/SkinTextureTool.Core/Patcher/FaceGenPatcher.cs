@@ -29,6 +29,21 @@ public sealed class FaceGenPatcher
     public static string FaceGenPath(INpcGetter npc) =>
         $@"meshes\actors\character\facegendata\facegeom\{npc.FormKey.ModKey.FileName}\{npc.FormKey.ID:X8}.nif";
 
+    /// <summary>
+    /// Khajiit, Argonians and other beast races: the IsBeastRace keyword the vanilla ones (and their vampire
+    /// versions) carry, or a name saying so for custom races without it.
+    /// </summary>
+    public bool IsBeast(IRaceGetter race)
+    {
+        if (race.Keywords != null)
+            foreach (var k in race.Keywords)
+                if (k.TryResolve(_cache, out var kw) && string.Equals(kw.EditorID, "IsBeastRace", StringComparison.OrdinalIgnoreCase)) return true;
+        var id = race.EditorID ?? "";
+        return id.Contains("Khajiit", StringComparison.OrdinalIgnoreCase) || id.Contains("Argonian", StringComparison.OrdinalIgnoreCase);
+    }
+
+    public bool IsBeast(INpcGetter npc) => npc.Race.TryResolve(_cache, out var race) && IsBeast(race);
+
     /// <summary>The body mesh path a race's own skin uses for one sex.</summary>
     public string? BodyPath(IRaceGetter race, bool female) => PiecePath(race, female, BipedObjectFlag.Body);
 

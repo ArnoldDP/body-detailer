@@ -55,6 +55,8 @@ public partial class MainWindow : Window
         public string? Mo2Folder { get; set; }
         public double NeckBand { get; set; } = 4;
         public double LimbBand { get; set; } = 3;
+        public bool SkipBeasts { get; set; } = true;
+        public bool ZipOutput { get; set; }
     }
 
     public MainWindow()
@@ -80,6 +82,7 @@ public partial class MainWindow : Window
         ExportFolderBox.Text = state.ExportFolder ?? "";
         if (string.IsNullOrEmpty(Patcher.Mo2Folder) && state.Mo2Folder != null) Patcher.Mo2Folder = state.Mo2Folder;
         Patcher.Bands = (state.NeckBand, state.LimbBand);
+        Patcher.Options = (state.SkipBeasts, state.ZipOutput);
         Settings.Changed += () => _debounce.Start();
         Settings.GeometryChanged += () => _geometryDebounce.Start();
         Sliders.Changed += () => _geometryDebounce.Start();
@@ -636,6 +639,8 @@ public partial class MainWindow : Window
                 Mo2Folder = string.IsNullOrWhiteSpace(Patcher.Mo2Folder) ? null : Patcher.Mo2Folder,
                 NeckBand = Patcher.Bands.Neck,
                 LimbBand = Patcher.Bands.Limb,
+                SkipBeasts = Patcher.Options.SkipBeasts,
+                ZipOutput = Patcher.Options.Zip,
             };
             File.WriteAllText(StateFile, JsonSerializer.Serialize(state, new JsonSerializerOptions { WriteIndented = true }));
         }

@@ -18,9 +18,10 @@ public static class HeadPartBatch
     public sealed record Outcome(int Heads, int Written, int Tris, List<string> Lines);
 
     public static Outcome Run(IEnumerable<ISkyrimModGetter> priority, ILinkCache<ISkyrimMod, ISkyrimModGetter> cache, VirtualData data,
-        FaceGenPatcher patcher, string? output, float band, Action<string>? progress)
+        FaceGenPatcher patcher, string? output, float band, Action<string>? progress, bool skipBeasts = true)
     {
         var lines = new List<string>();
+        var beastSkipped = 0;
         // playable face parts, grouped by the mesh they use (several races often share one)
         var byMesh = new Dictionary<string, (bool Female, List<IHeadPartGetter> Parts)>(StringComparer.OrdinalIgnoreCase);
         foreach (var part in priority.HeadPart().WinningOverrides())
@@ -29,6 +30,8 @@ public static class HeadPartBatch
             if (part.Model?.File == null) continue;
             var mesh = MeshPath(part.Model.File.ToString());
             if (!data.Exists(mesh)) continue;
+            // a head part made only for beast races (Khajiit, Argonian heads) is left alone
+            if (skipBeasts && OnlyBeasts(part, cache, patcher)) { beastSkipped++; continue; }
             var female = part.Flags.HasFlag(HeadPart.Flag.Female) && !part.Flags.HasFlag(HeadPart.Flag.Male);
             if (!byMesh.TryGetValue(mesh, out var entry)) byMesh[mesh] = entry = (female, new List<IHeadPartGetter>());
             entry.Parts.Add(part);
@@ -89,7 +92,15 @@ public static class HeadPartBatch
             tris += patched;
             lines.Add($"{mesh} ({(female ? "female" : "male")}, {parts.Count} head part(s)): seam {fit.SeamVertices} vertices, {fit.Merges.Count} merged, against {Path.GetFileName(bodyPath)}; {patched} .tri file(s)");
         }
+        if (beastSkipped > 0) lines.Insert(0, $"{beastSkipped} beast-race head part(s) left alone.");
         return new Outcome(byMesh.Count, written, tris, lines);
+    }
+
+    private static bool OnlyBeasts(IHeadPartGetter part, ILinkCache<ISkyrimMod, ISkyrimModGetter> cache, FaceGenPatcher patcher)
+    {
+        if (!part.ValidRaces.TryResolve(cache, out var list)) return false;
+        var races = list.Items.Select(i => cache.TryResolve<IRaceGetter>(i.FormKey, out var r) ? r : null).Where(r => r != null).ToList();
+        return races.Count > 0 && races.All(r => patcher.IsBeast(r!));
     }
 
     private static string? BodyForPart(IHeadPartGetter part, bool female, ILinkCache<ISkyrimMod, ISkyrimModGetter> cache, FaceGenPatcher patcher)
