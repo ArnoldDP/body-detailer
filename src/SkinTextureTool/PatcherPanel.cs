@@ -116,18 +116,22 @@ public sealed class PatcherPanel : DockPanel
         _scan.IsEnabled = _fit.IsEnabled = false;
         try
         {
-            // a fresh output each run, so heads no longer patched don't linger
-            var faceGen = Path.Combine(output, "meshes", "actors", "character", "facegendata", "facegeom");
-            if (Directory.Exists(faceGen)) Directory.Delete(faceGen, true);
-            float neck = (float)_neckBand.Value, limb = (float)_limbBand.Value;
-            // a fresh output each run: hands and feet too, so pieces no longer patched don't linger
-            foreach (var sub in new[] { "character assets" })
+            // a fresh output each run (as the piercing distributor does): everything the patcher writes lives under
+            // meshes, so that's cleared; the folder's other files (MO2's meta.ini…) stay. Only a folder this tool made
+            // (it carries the marker) or one without meshes yet is cleared, so pointing it at another mod by mistake
+            // can't delete that mod's meshes.
+            var meshes = Path.Combine(output, "meshes");
+            if (Directory.Exists(meshes))
             {
-                var assets = Path.Combine(output, "meshes", "actors", "character", sub);
-                if (Directory.Exists(assets))
-                    foreach (var f in Directory.EnumerateFiles(assets, "*.nif").Where(f => Path.GetFileName(f).Contains("hands", StringComparison.OrdinalIgnoreCase) || Path.GetFileName(f).Contains("feet", StringComparison.OrdinalIgnoreCase)))
-                        File.Delete(f);
+                if (!File.Exists(Path.Combine(output, Mo2Instance.OutputMarker)))
+                {
+                    _status.Text = "That folder already has meshes that this tool didn't write. Choose an empty folder or this tool's previous output.";
+                    return;
+                }
+                _status.Text = "Clearing the previous output…";
+                await Task.Run(() => Directory.Delete(meshes, true));
             }
+            float neck = (float)_neckBand.Value, limb = (float)_limbBand.Value;
             var summary = await Task.Run(() => NpcBatch.Run(folder, output, neck, m => Dispatcher.BeginInvoke(() => _status.Text = m), limb));
             _report.Text = summary.ToText();
             _status.Text = $"Wrote {summary.Written} heads to {output}.";
