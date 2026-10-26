@@ -112,6 +112,20 @@ public sealed class MaterialLayer : Layer
     [Range(0, 1)] public float CavityOcclusion { get; set; } = 0.5f;
 }
 
+/// <summary>
+/// Starts from the textures the loaded meshes already use (resolved through the MO2 load order when the tool
+/// knows it, else next to the mesh) instead of a flat base: the procedural layers paint on top of them. Each
+/// strength blends between the tool's own base (0) and the existing texture (1).
+/// </summary>
+public sealed class ExistingTexturesLayer : Layer
+{
+    public ExistingTexturesLayer() => Enabled = false;
+    [Range(0, 1)] public float Diffuse { get; set; } = 1f;
+    [Range(0, 1)] public float NormalMap { get; set; } = 1f;
+    [Range(0, 1)] public float Specular { get; set; } = 1f;
+    [Range(0, 1)] public float Subsurface { get; set; } = 1f;
+}
+
 /// <summary>How the model-space normal map is baked (the MuDynamicNormalMap-style pass).</summary>
 public sealed class NormalLayer : Layer
 {
@@ -160,6 +174,8 @@ public sealed class SkinSettings
     /// <summary>Run the noise on UV coordinates instead of 3D positions (shows seams, follows the UV layout).</summary>
     public bool UseUvCoordinates { get; set; }
 
+    /// <summary>Start from the meshes' current textures.</summary>
+    public ExistingTexturesLayer StartFromExisting { get; set; } = new();
     public BaseLayer Base { get; set; } = new();
     public ZoneLayer RedZones { get; set; } = new() { Color = Rgb.FromHex("#C0504D"), Strength = 0.2f };
     public ZoneLayer YellowZones { get; set; } = new() { Color = Rgb.FromHex("#C8A050"), Strength = 0.12f, Scale = 0.7f };

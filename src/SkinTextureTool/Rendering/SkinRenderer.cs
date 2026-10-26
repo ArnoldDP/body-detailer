@@ -34,6 +34,8 @@ internal sealed class SkinRenderer
         public int AlbedoB, SpecB, SssB, NormalB, RfaosB, HeightB;
         public int AlbedoT, HeightT, SpecT, SssT, RfaosT; // a region's layers before blending
         public bool Ready;
+        /// <summary>The meshes' current textures, uploaded when "start from existing" is on (0 when absent).</summary>
+        public int ExAlbedo, ExNormal, ExSpec, ExSss;
         public IEnumerable<int> All => new[]
         {
             Albedo, Height, Spec, Sss, Normal, Rfaos, AlbedoB, SpecB, SssB, NormalB, RfaosB, HeightB,
@@ -245,6 +247,8 @@ internal sealed class SkinRenderer
         {
             var mask = Image(images, region.MaskFor(g.Name));
             if (mask == 0) continue;
+            // regions start from the same existing textures as the main skin, so a masked area doesn't drop them
+            region.Settings.StartFromExisting = s.StartFromExisting;
             RenderLayers(g, region.Settings, images, g.AlbedoT, g.HeightT, g.SpecT, g.SssT, g.RfaosT);
             BindTargets(g.AlbedoB, g.HeightB, g.SpecB, g.SssB, g.RfaosB);
             _composite!.Use();
@@ -278,6 +282,10 @@ internal sealed class SkinRenderer
         _bake.Set("uHasDetailMap", detail != 0 ? 1 : 0);
         _bake.Set("uDetailMapStrength", s.Normals.DetailMapStrength);
         _bake.Set("uZCorrection", s.Normals.TangentZCorrection ? 1 : 0);
+        var exNormal = s.StartFromExisting.Enabled ? g.ExNormal : 0;
+        _bake.Texture("uExNormal", 2, exNormal);
+        _bake.Set("hExNormal", exNormal != 0 ? 1 : 0);
+        _bake.Set("uExNormalMix", s.StartFromExisting.NormalMap);
         DrawShapes(g);
 
         // 3. bleed past island edges, ping-ponging between the two texture sets
@@ -314,6 +322,12 @@ internal sealed class SkinRenderer
         _generate!.Use();
         SetLayerUniforms(_generate, s);
         _generate.Set("uFootprint", _footprint);
+        var ex = s.StartFromExisting;
+        var useEx = ex.Enabled;
+        _generate.Texture("uExAlbedo", 11, useEx ? g.ExAlbedo : 0); _generate.Set("hExAlbedo", useEx && g.ExAlbedo != 0 ? 1 : 0);
+        _generate.Texture("uExSpec", 12, useEx ? g.ExSpec : 0); _generate.Set("hExSpec", useEx && g.ExSpec != 0 ? 1 : 0);
+        _generate.Texture("uExSss", 13, useEx ? g.ExSss : 0); _generate.Set("hExSss", useEx && g.ExSss != 0 ? 1 : 0);
+        _generate.Set("uExMix", new Vector3(ex.Diffuse, ex.Specular, ex.Subsurface));
         var unit = 0;
         foreach (var (name, layer) in Masks)
         {
@@ -412,6 +426,14 @@ internal sealed class SkinRenderer
     }
 
     public IReadOnlyList<string> GroupNames => _groups.Select(g => g.Name).ToList();
+
+    /// <summary>Sets a group's existing textures (image-texture ids, 0 for none).</summary>
+    public void SetExisting(string group, int albedo, int normal, int spec, int sss)
+    {
+        var g = _groups.FirstOrDefault(x => x.Name == group);
+        if (g == null) return;
+        (g.ExAlbedo, g.ExNormal, g.ExSpec, g.ExSss) = (albedo, normal, spec, sss);
+    }
 
     /// <summary>Reads one group's textures back for export: RGBA, row 0 at v = 0.</summary>
     public GeneratedTextures Read(string group)

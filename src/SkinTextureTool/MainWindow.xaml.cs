@@ -31,6 +31,10 @@ public partial class MainWindow : Window
     private bool _generating, _dirty;
     private bool _meshReady;
     private IReadOnlyList<string> _groups = Array.Empty<string>();
+    /// <summary>Per texture group, a shape that uses it (for its NIF's texture paths).</summary>
+    private Dictionary<string, ShapeData> _groupShapes = new(StringComparer.OrdinalIgnoreCase);
+    private SkinTextureTool.Core.Patcher.VirtualData? _gameData;
+    private string? _gameDataFolder;
 
     private sealed class ShapeRow : INotifyPropertyChanged
     {
@@ -259,6 +263,7 @@ public partial class MainWindow : Window
         await Preview.Run(() => Preview.Renderer.SetMesh(baked));
         Painter.SetMesh(groups);
         var names = groups.Select(g => g.Key).ToList();
+        _groupShapes = groups.ToDictionary(g => g.Key, g => g.Item2[0].Shape, StringComparer.OrdinalIgnoreCase);
         if (!names.SequenceEqual(_groups))
         {
             _groups = names;
@@ -331,6 +336,7 @@ public partial class MainWindow : Window
                 _dirty = false;
                 var snapshot = Settings.Settings.Clone();
                 await EnsureImagesAsync(snapshot);
+                await EnsureExistingTexturesAsync(snapshot);
                 var size = PreviewSize;
                 var images = new Dictionary<string, int>(_imageTextures, StringComparer.OrdinalIgnoreCase);
                 await Preview.Run(() => Preview.Renderer.Generate(snapshot, size, images));
@@ -365,6 +371,70 @@ public partial class MainWindow : Window
         Regions.Settings = Settings.Settings;
         SaveState();
         Regenerate();
+    }
+
+    // ---------- starting from the meshes' current textures ----------
+
+    /// <summary>
+    /// When "start from existing" is on, finds each group's current diffuse, normal, subsurface and specular
+    /// textures (texture slots 0, 1, 2 and 7 of its NIF) and hands them to the renderer. They're resolved through
+    /// the MO2 load order when the tool knows it (the winning copies, extracted from archives if need be), else
+    /// in the Data folder the mesh sits in.
+    /// </summary>
+    private async Task EnsureExistingTexturesAsync(SkinSettings s)
+    {
+        if (!s.StartFromExisting.Enabled) return;
+        var found = new List<string>(); var missing = new List<string>();
+        foreach (var (group, shape) in _groupShapes)
+        {
+            var ids = new int[4];
+            var slots = new[] { 0, 1, 2, 7 };
+            for (var k = 0; k < slots.Length; k++)
+            {
+                var rel = slots[k] < shape.TexturePaths.Length ? shape.TexturePaths[slots[k]] : null;
+                if (rel == null) continue;
+                var file = await Task.Run(() => ResolveTexture(rel, shape.NifPath));
+                if (file == null) { missing.Add(Path.GetFileName(rel)); continue; }
+                if (!_imageTextures.TryGetValue(file, out var id))
+                {
+                    try
+                    {
+                        var image = await Task.Run(() => ImageFiles.Load(file));
+                        id = await Preview.Run(() => Preview.Renderer.ImageTexture(file, image));
+                    }
+                    catch { id = 0; missing.Add(Path.GetFileName(rel) + " (unreadable)"); }
+                    _imageTextures[file] = id;
+                }
+                ids[k] = id;
+                if (id != 0) found.Add(Path.GetFileName(rel));
+            }
+            await Preview.Run(() => Preview.Renderer.SetExisting(group, ids[0], ids[1], ids[3], ids[2]));
+        }
+        if (missing.Count > 0) Status($"Starting from existing textures; couldn't find {string.Join(", ", missing.Distinct().Take(6))}.");
+    }
+
+    private string? ResolveTexture(string texture, string nifPath)
+    {
+        var rel = texture.Replace('/', Path.DirectorySeparatorChar).TrimStart(Path.DirectorySeparatorChar);
+        if (!rel.StartsWith("textures" + Path.DirectorySeparatorChar, StringComparison.OrdinalIgnoreCase)) rel = Path.Combine("textures", rel);
+        var mo2Folder = Dispatcher.Invoke(() => Patcher.Mo2Folder);
+        if (File.Exists(Path.Combine(mo2Folder, "ModOrganizer.ini")))
+        {
+            if (_gameData == null || _gameDataFolder != mo2Folder)
+            {
+                _gameData = new SkinTextureTool.Core.Patcher.VirtualData(new SkinTextureTool.Core.Patcher.Mo2Instance(mo2Folder),
+                    Path.Combine(AppContext.BaseDirectory, "Extracted textures"));
+                _gameDataFolder = mo2Folder;
+            }
+            var file = _gameData.Materialize(rel);
+            if (file != null) return file;
+        }
+        // no MO2 setup (or not in it): the Data folder the mesh sits in
+        var parts = Path.GetFullPath(nifPath).Split(Path.DirectorySeparatorChar);
+        var i = Array.FindLastIndex(parts, p => p.Equals("meshes", StringComparison.OrdinalIgnoreCase));
+        if (i < 0) return null;
+        var local = Path.Combine(string.Join(Path.DirectorySeparatorChar, parts[..i]), rel);
+        return File.Exists(local) ? local : null;
     }
 
     // ---------- export ----------

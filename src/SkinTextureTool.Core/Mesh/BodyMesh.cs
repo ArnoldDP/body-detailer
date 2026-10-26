@@ -12,6 +12,8 @@ public sealed class ShapeData
     public required float[] Uvs { get; init; }       // uv, v down as in the texture
     public required uint[] Indices { get; init; }
     public string? DiffusePath { get; init; }
+    /// <summary>The shader's texture slots as stored in the NIF (0 diffuse, 1 normal, 2 subsurface, 7 specular).</summary>
+    public string?[] TexturePaths { get; init; } = Array.Empty<string?>();
     public bool ModelSpaceNormals { get; init; }
 
     public int VertexCount => Positions.Length / 3;
@@ -60,10 +62,16 @@ public static class BodyMesh
 
             string? diffuse = null;
             var msn = false;
+            var slots = new string?[9];
             try
             {
                 diffuse = nif.GetTexturePathByIndex(shape, 0);
                 msn = nif.GetShader(shape)?.IsModelSpace() == true;
+                for (var i = 0; i < slots.Length; i++)
+                {
+                    var t = nif.GetTexturePathByIndex(shape, (uint)i);
+                    slots[i] = string.IsNullOrWhiteSpace(t) ? null : t;
+                }
             }
             catch
             {
@@ -76,6 +84,7 @@ public static class BodyMesh
                 NifPath = path,
                 Positions = pos, Uvs = uv, Indices = idx,
                 DiffusePath = string.IsNullOrWhiteSpace(diffuse) ? null : diffuse,
+                TexturePaths = slots,
                 ModelSpaceNormals = msn,
             });
         }

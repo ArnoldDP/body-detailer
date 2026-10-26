@@ -98,6 +98,8 @@ internal static class Shaders
         uniform vec3 uVeinColor; uniform vec3 uVeins; // strength, scale, enabled
         uniform vec4 uMaterial; uniform vec3 uSssColor; // spec, specVariation, subsurface, -
         uniform vec4 uPbr; // roughness, roughness variation, fuzz, cavity occlusion
+        // the meshes' current textures to start from, with a strength each (diffuse, specular, subsurface)
+        uniform sampler2D uExAlbedo, uExSpec, uExSss; uniform int hExAlbedo, hExSpec, hExSss; uniform vec3 uExMix;
 
         // masks: sampler + "has mask" flag; without a mask a layer applies everywhere it otherwise would
         uniform sampler2D mRed, mYellow, mBlue, mLips, mPores, mFreck, mMole, mPimple, mBlem, mRedSpot, mVeins;
@@ -122,6 +124,7 @@ internal static class Shaders
             // coordinates in body units (about 1.4 cm each); UV mode maps the 0..1 layout onto a 100-unit square
             vec3 p = (uUseUv == 1 ? vec3(vUv * 100.0, 0.0) : vPos) * uScale;
             vec3 col = uBaseColor;
+            if (hExAlbedo == 1) col = mix(col, texture(uExAlbedo, vUv).rgb, uExMix.x);
             float height = 0.0;
             float poreAmount = 0.0;
             float cavity = 0.0; // how recessed this texel is, for ambient occlusion
@@ -198,12 +201,15 @@ internal static class Shaders
             }
 
             float spec = uMaterial.x * (1.0 - uMaterial.y * (0.5 + 0.5 * fbm(p * 0.2 + 131.0, 3)));
+            if (hExSpec == 1) spec = mix(spec, texture(uExSpec, vUv).r, uExMix.y);
             spec *= 1.0 - poreAmount * 0.5;
 
             oAlbedo = vec4(clamp(col, 0.0, 1.0), 1.0);
             oHeight = vec4(height, 0.0, 0.0, 1.0);
             oSpec = vec4(vec3(clamp(spec, 0.0, 1.0)), 1.0);
-            oSss = vec4(uSssColor * uMaterial.z, 1.0);
+            vec3 sss = uSssColor * uMaterial.z;
+            if (hExSss == 1) sss = mix(sss, texture(uExSss, vUv).rgb, uExMix.z);
+            oSss = vec4(sss, 1.0);
             float rough = uPbr.x + uPbr.y * 0.3 * fbm(p * 0.15 + 137.0, 3) + poreAmount * 0.15;
             float fuzz = uPbr.z * smoothstep(-0.4, 0.4, fbm(p * 0.05 + 139.0, 3));
             float ao = 1.0 - uPbr.w * cavity;
@@ -222,11 +228,17 @@ internal static class Shaders
         layout(location=0) out vec4 oNormal;
         uniform sampler2D uHeight; uniform vec2 uTexel; uniform float uDetailStrength;
         uniform sampler2D uDetailMap; uniform int uHasDetailMap; uniform float uDetailMapStrength; uniform int uZCorrection;
+        // an existing model-space normal map to start from instead of the bare mesh normal
+        uniform sampler2D uExNormal; uniform int hExNormal; uniform float uExNormalMix;
 
         float h(vec2 uv, float centre) { vec4 s = texture(uHeight, uv); return s.a > 0.5 ? s.r : centre; }
 
         void main() {
             vec3 n = normalize(vNrm);
+            if (hExNormal == 1) {
+                vec3 e = texture(uExNormal, vUv).rgb * 2.0 - 1.0; // stored x, z, y
+                n = normalize(mix(n, normalize(vec3(e.r, e.b, e.g)), uExNormalMix));
+            }
             vec3 t = vTan; vec3 b = vBit;
             vec3 ft = length(t) > 0.0 ? normalize(t - n * dot(n, t)) : vec3(1, 0, 0);
             float handed = dot(cross(n, ft), b) < 0.0 ? -1.0 : 1.0;
