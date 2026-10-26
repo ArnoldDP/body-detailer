@@ -73,7 +73,9 @@ internal static class Shaders
     /// The skin layers. Outputs: 0 albedo (a = coverage), 1 height in world units (a = coverage),
     /// 2 specular (r) and 3 subsurface tint.
     /// </summary>
-    public const string Generate = "#version 330 core\n" + Noise + """
+    public const string GenerateShell = "#version 330 core\n#define SHELL\n" + Noise + GenerateBody;
+    public const string Generate = "#version 330 core\n" + Noise + GenerateBody;
+    private const string GenerateBody = """
         in vec3 vPos; in vec2 vUv; in vec3 vNrm; in vec3 vTan; in vec3 vBit; in vec2 vUvScale;
         layout(location=0) out vec4 oAlbedo;
         layout(location=1) out vec4 oHeight;
@@ -95,7 +97,11 @@ internal static class Shaders
         // spots: amount, scale, strength, bump
         uniform vec3 uFreckColor, uMoleColor, uPimpleColor, uBlemColor, uRedSpotColor;
         uniform vec4 uFreck, uMole, uPimple, uBlem, uRedSpot;
-        uniform vec3 uVeinColor; uniform vec3 uVeins; // strength, scale, enabled
+        uniform vec3 uVeinColor; uniform vec3 uVeins; uniform float uVeinBump; // strength, scale, enabled; bump
+        // fur: colour, pattern colour, belly colour; (enabled, colour strength, colour variation, density),
+        // (strand length, spread, normal strength, light belly), (stripes, stripe scale, spots, spot scale)
+        uniform vec3 uFurColor, uFurPatternColor, uFurBellyColor; uniform vec4 uFur, uFur2, uFur3;
+        uniform sampler2D mFur; uniform int hFur;
         uniform vec4 uMaterial; uniform vec3 uSssColor; // spec, specVariation, subsurface, -
         uniform vec4 uPbr; // roughness, roughness variation, fuzz, cavity occlusion
         // the meshes' current textures to start from, with a strength each (diffuse, specular, subsurface)
@@ -161,6 +167,7 @@ internal static class Shaders
                 float r = 1.0 - abs(fbm(p * 0.06 * uVeins.y + 71.0, 3));
                 float v = pow(clamp(r, 0.0, 1.0), 40.0);
                 col = mix(col, uVeinColor, uVeins.x * v * mask(mVeins, hVeins));
+                height += v * uVeinBump * 0.03 * mask(mVeins, hVeins);
             }
             // moles: rare dark spots, slightly raised
             if (uMole.x > 0.0) {
@@ -200,6 +207,44 @@ internal static class Shaders
                 height += (v.z < 0.6 ? 1.0 : 0.0) * smoothstep(0.38, 0.0, v.x) * uGoose.x * 0.01 * detailFade(2.5 * uGoose.y);
             }
 
+            // fur: strands follow a flow over the surface (down the body, sweeping away from the spine), drawn as
+            // cells stretched along it, each with its own height (the shell texture's alpha)
+            vec4 shell = vec4(0.0);
+            if (uFur.x > 0.5) {
+                float cover = mask(mFur, hFur);
+                vec3 n = normalize(vNrm);
+                vec3 flow = vec3(0.0, 0.0, -1.0) + vec3(sign(vPos.x + 1e-4), 0.0, 0.0) * uFur2.y * 1.5;
+                flow = flow - n * dot(flow, n);
+                flow = length(flow) > 1e-3 ? normalize(flow) : normalize(cross(n, vec3(1, 0, 0)));
+                vec3 side = normalize(cross(n, flow));
+                // strands are as fine as the density asks, but never under about 2.5 texels at this resolution:
+                // finer than that can't be drawn, and the shells need real strands, not a blur
+                float strandFreq = min(12.0 * uFur.w, 1.0 / max(2.5 * uScale * uFootprint, 1e-6));
+                vec3 q = vec3(dot(vPos, flow) / uFur2.x, dot(vPos, side), dot(vPos, n)) * (strandFreq * uScale);
+                vec3 cell = voronoi(q + 151.0);
+                // a strand fills most of its cell, tapering at the edge, so the coat reads full rather than patchy
+                float core = smoothstep(1.15, 0.0, cell.x);
+                float strandHeight = pow(cell.z, 0.7) * core; // more strands reach the outer shells
+                float fade = 1.0;
+                // colour: fur over the skin, with stripes, spots, a lighter belly and per-strand variation
+                vec3 fur = uFurColor * (1.0 + uFur.z * 0.35 * fbm(p * 0.06 + 157.0, 3));
+                if (uFur3.x > 0.0) {
+                    float band = sin(vPos.z * 0.45 * uFur3.y + fbm(p * 0.04 * uFur3.y + 163.0, 3) * 3.0 + abs(vPos.x) * 0.12 * uFur3.y);
+                    fur = mix(fur, uFurPatternColor, uFur3.x * smoothstep(0.35, 0.8, band));
+                }
+                if (uFur3.z > 0.0)
+                    fur = mix(fur, uFurPatternColor, uFur3.z * spots(p, 0.18 * uFur3.w, 0.55, 0.55, 167.0));
+                if (uFur2.w > 0.0) {
+                    float belly = smoothstep(0.25, 0.85, n.y) * smoothstep(40.0, 70.0, vPos.z) * (1.0 - smoothstep(108.0, 116.0, vPos.z));
+                    float throat = smoothstep(0.2, 0.8, n.y) * smoothstep(104.0, 112.0, vPos.z);
+                    fur = mix(fur, uFurBellyColor, uFur2.w * max(belly, throat));
+                }
+                fur *= mix(1.0, 0.82 + 0.25 * strandHeight, fade);
+                col = mix(col, fur, uFur.y * cover);
+                height -= (1.0 - core) * uFur2.z * 0.004 * cover * fade;
+                shell = vec4(clamp(fur, 0.0, 1.0), clamp(mix(0.5, strandHeight, fade) * cover, 0.0, 1.0));
+            }
+
             float spec = uMaterial.x * (1.0 - uMaterial.y * (0.5 + 0.5 * fbm(p * 0.2 + 131.0, 3)));
             if (hExSpec == 1) spec = mix(spec, texture(uExSpec, vUv).r, uExMix.y);
             spec *= 1.0 - poreAmount * 0.5;
@@ -214,6 +259,9 @@ internal static class Shaders
             float fuzz = uPbr.z * smoothstep(-0.4, 0.4, fbm(p * 0.05 + 139.0, 3));
             float ao = 1.0 - uPbr.w * cavity;
             oRfaos = vec4(clamp(rough, 0.04, 1.0), clamp(fuzz, 0.0, 1.0), clamp(ao, 0.0, 1.0), clamp(spec, 0.0, 1.0));
+        #ifdef SHELL
+            oAlbedo = shell; // the shell pass writes only the fur shell texture
+        #endif
         }
         """;
 
@@ -343,7 +391,7 @@ internal static class Shaders
         #version 330 core
         in vec2 vUv; in vec3 vNrm; in vec3 vPos;
         out vec4 frag;
-        uniform sampler2D uAlbedo, uNormal, uSpec, uSss, uRfaos;
+        uniform sampler2D uAlbedo, uNormal, uSpec, uSss, uRfaos, uShell;
         uniform int uMode; uniform int uReady; uniform vec3 uLight; uniform vec3 uEye;
         uniform sampler2D uPaint; uniform int uHasPaint;
         uniform vec4 uBrush, uBrushMirror; // centre, radius (0 = hidden)
@@ -374,6 +422,7 @@ internal static class Shaders
             if (uMode == 3) return vec3(spec);
             if (uMode == 4) return sss;
             if (uMode == 5) return texture(uRfaos, vUv).rgb;
+            if (uMode == 6) { vec4 sh = texture(uShell, vUv); return mix(vec3(0.05), sh.rgb, sh.a); } // fur strands (shell alpha) in fur colour
             vec3 v = normalize(uEye - vPos);
             float ndl = dot(n, uLight);
             float diffuse = max(ndl, 0.0);

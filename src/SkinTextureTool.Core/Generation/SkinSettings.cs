@@ -97,6 +97,52 @@ public sealed class VeinsLayer : Layer
     public Rgb Color { get; set; } = Rgb.FromHex("#5A6E9A");
     [Range(0, 1)] public float Strength { get; set; } = 0.06f;
     [Range(0.2f, 4)] public float Scale { get; set; } = 1f;
+    /// <summary>How far the veins stand out of the skin in the normal map.</summary>
+    [Range(0, 1)] public float Bump { get; set; } = 0f;
+}
+
+/// <summary>
+/// Procedural fur: colour, patterns and strands in the regular textures, plus an optional shell texture
+/// (name_shell.dds next to the diffuse, with name_shell.json) for Bottled Shaders' fur shells. A mask per texture
+/// sets where fur grows (white = fur).
+/// </summary>
+[Maskable]
+public sealed class FurLayer : Layer
+{
+    public FurLayer() => Enabled = false;
+    public Rgb Color { get; set; } = Rgb.FromHex("#8C7B6A");
+    /// <summary>How much the fur colour replaces the skin colour in the diffuse.</summary>
+    [Range(0, 1)] public float ColorStrength { get; set; } = 0.8f;
+    [Range(0, 1)] public float ColorVariation { get; set; } = 0.3f;
+    /// <summary>Strands per unit of surface; higher is finer fur.</summary>
+    [Range(0.3f, 3)] public float Density { get; set; } = 1f;
+    /// <summary>How stretched strands are along the fur direction (1 = round tufts).</summary>
+    [Range(1, 8)] public float StrandLength { get; set; } = 4f;
+    /// <summary>Fur direction: 0 straight down the body, 1 sweeping out away from the spine.</summary>
+    [Range(0, 1)] public float Spread { get; set; } = 0.35f;
+    /// <summary>Strand grooves in the normal map.</summary>
+    [Range(0, 1)] public float NormalStrength { get; set; } = 0.4f;
+    public Rgb PatternColor { get; set; } = Rgb.FromHex("#3C3028");
+    [Range(0, 1)] public float Stripes { get; set; } = 0f;
+    [Range(0.2f, 4)] public float StripeScale { get; set; } = 1f;
+    [Range(0, 1)] public float Spots { get; set; } = 0f;
+    [Range(0.2f, 4)] public float SpotScale { get; set; } = 1f;
+    /// <summary>Lighter fur on the front of the torso, throat and inner limbs.</summary>
+    [Range(0, 1)] public float LightBelly { get; set; } = 0.3f;
+    public Rgb BellyColor { get; set; } = Rgb.FromHex("#D8CDBE");
+
+    // Bottled Shaders fur shells (written to name_shell.json)
+    public bool ExportShells { get; set; } = true;
+    [Range(1, 32)] public int ShellCount { get; set; } = 12;
+    [Range(0, 4)] public float ShellLength { get; set; } = 1.1f;
+    [Range(0, 1)] public float Droop { get; set; } = 0.45f;
+    [Range(0, 1)] public float RootDarkening { get; set; } = 1f;
+    [Range(0, 1)] public float RootThreshold { get; set; } = 0f;
+    [Range(0, 1)] public float TipThreshold { get; set; } = 1f;
+    /// <summary>How much the shells take the shell texture's colour over the skin's diffuse.</summary>
+    [Range(0, 1)] public float ShellColor { get; set; } = 1f;
+    [Range(0, 8000)] public float FadeStart { get; set; } = 700f;
+    [Range(0, 8000)] public float FadeEnd { get; set; } = 2500f;
 }
 
 public sealed class MaterialLayer : Layer
@@ -190,6 +236,7 @@ public sealed class SkinSettings
     public SpotLayer Blemishes { get; set; } = new() { Color = Rgb.FromHex("#B0605A"), Amount = 0.4f, Scale = 0.6f, Strength = 0.15f };
     public SpotLayer RedSpots { get; set; } = new() { Color = Rgb.FromHex("#C04844"), Amount = 0.2f, Scale = 1.5f, Strength = 0.2f };
     public VeinsLayer Veins { get; set; } = new();
+    public FurLayer Fur { get; set; } = new();
     public MaterialLayer Material { get; set; } = new();
     public NormalLayer Normals { get; set; } = new();
 

@@ -89,6 +89,7 @@
                         <ComboBoxItem Content="Specular (_s)"/>
                         <ComboBoxItem Content="Subsurface (_sk)"/>
                         <ComboBoxItem Content="RFAOS (roughness, fuzz, AO)"/>
+                        <ComboBoxItem Content="Fur shell (strand pattern)"/>
                     </ComboBox>
                 </StackPanel>
                 <TextBlock DockPanel.Dock="Bottom" Foreground="Gray" Margin="0,6,0,0"

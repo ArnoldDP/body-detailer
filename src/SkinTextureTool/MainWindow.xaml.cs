@@ -82,7 +82,8 @@ public partial class MainWindow : Window
         Sliders.Changed += () => _geometryDebounce.Start();
         Closing += (_, _) => SaveState();
         var saved = state.Nifs.Where(File.Exists).ToList();
-        if (saved.Count > 0) Loaded += async (_, _) => await AddNifsAsync(saved);
+        // a command-line export brings its own meshes, so the saved ones aren't reloaded
+        if (saved.Count > 0) Loaded += async (_, _) => { if (!Headless) await AddNifsAsync(saved); };
     }
 
     // ---------- meshes ----------
@@ -183,6 +184,8 @@ public partial class MainWindow : Window
             try
             {
                 var shapes = await Task.Run(() => BodyMesh.Load(path));
+                // added meanwhile (two loads of the same file racing)
+                if (_nifs.Any(n => string.Equals(n.Path, path, StringComparison.OrdinalIgnoreCase))) continue;
                 // Preselect shapes using model-space normals (skin); others (eyes, brows, hair) start unticked.
                 foreach (var s in shapes.Where(s => !s.ModelSpaceNormals)) _unselected.Add(s);
                 _nifs.Add((path, shapes));
@@ -240,7 +243,8 @@ public partial class MainWindow : Window
         var seamRings = Settings.Settings.Normals.SeamBlend;
         var conform = Settings.Settings.Normals.SeamConform;
         var subdivision = Settings.Settings.Normals.Subdivision;
-        var sets = _nifs.ToDictionary(n => n.Path, n => Sliders.SetFor(n.Path), StringComparer.OrdinalIgnoreCase);
+        var sets = _nifs.GroupBy(n => n.Path, StringComparer.OrdinalIgnoreCase)
+            .ToDictionary(g => g.Key, g => Sliders.SetFor(g.Key), StringComparer.OrdinalIgnoreCase);
         var sliderValues = Settings.Settings.NormalSliders;
         Status("Rebuilding normals…");
         var problems = new List<string>();
@@ -483,6 +487,13 @@ public partial class MainWindow : Window
                         () => DdsExporter.WriteBc7(Path.Combine(folder, group + "_sk.dds"), textures.Subsurface, size, size),
                     };
                     if (rfaos) jobs.Add(() => DdsExporter.WriteBc7(Path.Combine(folder, group + "_rfaos.dds"), textures.Rfaos, size, size));
+                    // Bottled Shaders fur shells: matched by name next to the diffuse
+                    if (textures.Shell != null && snapshot.Fur.ExportShells)
+                    {
+                        var shell = FillUncovered(textures.Shell, textures.Albedo, size);
+                        jobs.Add(() => DdsExporter.WriteBc7(Path.Combine(folder, group + "_shell.dds"), shell, size, size));
+                        jobs.Add(() => File.WriteAllText(Path.Combine(folder, group + "_shell.json"), ShellJson(snapshot.Fur)));
+                    }
                     Parallel.Invoke(jobs.ToArray());
                 });
                 written.Add(group);
@@ -502,9 +513,52 @@ public partial class MainWindow : Window
         }
     }
 
-    /// <summary>Command-line export: add the NIFs, generate with the saved settings, export, and log the result.</summary>
-    public async Task ExportHeadless(string folder, IReadOnlyList<string> nifs)
+    private static string ShellJson(FurLayer f) => JsonSerializer.Serialize(new Dictionary<string, object>
     {
+        ["Droop"] = f.Droop, ["Enabled"] = true, ["FadeEnd"] = f.FadeEnd, ["FadeStart"] = f.FadeStart, ["Length"] = f.ShellLength,
+        ["RootDarkening"] = f.RootDarkening, ["RootThreshold"] = f.RootThreshold, ["ShellColor"] = f.ShellColor,
+        ["ShellCount"] = f.ShellCount, ["TipThreshold"] = f.TipThreshold,
+    }, new JsonSerializerOptions { WriteIndented = true });
+
+    /// <summary>
+    /// The shell texture as rendered has nothing outside the UV islands; filtering and mipmaps would pull that
+    /// emptiness into the edges, so uncovered texels take their nearest covered neighbour's value (the albedo's
+    /// alpha marks coverage).
+    /// </summary>
+    private static byte[] FillUncovered(byte[] shell, byte[] albedo, int size)
+    {
+        var data = (byte[])shell.Clone();
+        var have = new bool[size * size];
+        for (var i = 0; i < have.Length; i++) have[i] = albedo[i * 4 + 3] > 0 || shell[i * 4 + 3] > 0 || shell[i * 4] > 0;
+        for (var step = 0; step < 16; step++)
+        {
+            var add = new List<(int, int)>();
+            for (var y = 0; y < size; y++)
+            for (var x = 0; x < size; x++)
+            {
+                var i = y * size + x;
+                if (have[i]) continue;
+                var from = x > 0 && have[i - 1] ? i - 1 : x < size - 1 && have[i + 1] ? i + 1 : y > 0 && have[i - size] ? i - size : y < size - 1 && have[i + size] ? i + size : -1;
+                if (from >= 0) add.Add((i, from));
+            }
+            if (add.Count == 0) break;
+            foreach (var (i, from) in add) { Array.Copy(data, from * 4, data, i * 4, 4); have[i] = true; }
+        }
+        return data;
+    }
+
+    /// <summary>Command-line export: add the NIFs, generate with the saved settings, export, and log the result.</summary>
+    /// <summary>Set for a command-line export, before the window is shown.</summary>
+    public bool Headless { get; set; }
+
+    public async Task ExportHeadless(string folder, IReadOnlyList<string> nifs, int? size = null)
+    {
+        if (size is { } wanted)
+        {
+            // the nearest export size on offer
+            var items = ExportSizeBox.Items.Cast<ComboBoxItem>().ToList();
+            ExportSizeBox.SelectedItem = items.MinBy(i => Math.Abs(int.Parse(i.Content.ToString()!) - wanted));
+        }
         await AddNifsAsync(nifs);
         ExportFolderBox.Text = folder;
         await ExportAsync();

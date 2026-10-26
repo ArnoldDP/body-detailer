@@ -9,7 +9,7 @@ namespace SkinTextureTool.Rendering;
 public sealed record ImageData(int Width, int Height, byte[] Rgba);
 
 /// <summary>The textures the tool exports, as RGBA with row 0 at v = 0 (the DDS layout).</summary>
-public sealed record GeneratedTextures(int Size, byte[] Albedo, byte[] Normal, byte[] Specular, byte[] Subsurface, byte[] Rfaos);
+public sealed record GeneratedTextures(int Size, byte[] Albedo, byte[] Normal, byte[] Specular, byte[] Subsurface, byte[] Rfaos, byte[]? Shell = null);
 
 /// <summary>A shape ready to upload: its mesh and the surface frames baked from it.</summary>
 public sealed record MeshInput(ShapeData Shape, SurfaceFrames Frames);
@@ -33,17 +33,19 @@ internal sealed class SkinRenderer
         public int Albedo, Height, Spec, Sss, Normal, Rfaos;
         public int AlbedoB, SpecB, SssB, NormalB, RfaosB, HeightB;
         public int AlbedoT, HeightT, SpecT, SssT, RfaosT; // a region's layers before blending
+        public int Shell; // fur shell texture (fur colour, strand height in alpha)
+        public bool HasShell;
         public bool Ready;
         /// <summary>The meshes' current textures, uploaded when "start from existing" is on (0 when absent).</summary>
         public int ExAlbedo, ExNormal, ExSpec, ExSss;
         public IEnumerable<int> All => new[]
         {
             Albedo, Height, Spec, Sss, Normal, Rfaos, AlbedoB, SpecB, SssB, NormalB, RfaosB, HeightB,
-            AlbedoT, HeightT, SpecT, SssT, RfaosT,
+            AlbedoT, HeightT, SpecT, SssT, RfaosT, Shell,
         };
     }
 
-    private GlProgram? _generate, _bake, _bleed, _preview, _composite;
+    private GlProgram? _generate, _bake, _bleed, _preview, _composite, _shell;
     private readonly List<Group> _groups = new();
     private int _emptyVao;
     private float _footprint = 0.05f;
@@ -58,13 +60,14 @@ internal sealed class SkinRenderer
     {
         ("Red", s => s.RedZones), ("Yellow", s => s.YellowZones), ("Blue", s => s.BlueZones), ("Lips", s => s.Lips),
         ("Pores", s => s.Pores), ("Freck", s => s.Freckles), ("Mole", s => s.Moles), ("Pimple", s => s.Pimples),
-        ("Blem", s => s.Blemishes), ("RedSpot", s => s.RedSpots), ("Veins", s => s.Veins),
+        ("Blem", s => s.Blemishes), ("RedSpot", s => s.RedSpots), ("Veins", s => s.Veins), ("Fur", s => s.Fur),
     };
 
     public void Initialize()
     {
         if (_generate != null) return;
         _generate = new GlProgram(Shaders.UvVertex, Shaders.Generate);
+        _shell = new GlProgram(Shaders.UvVertex, Shaders.GenerateShell);
         _bake = new GlProgram(Shaders.UvVertex, Shaders.BakeNormals);
         _bleed = new GlProgram(Shaders.ScreenVertex, Shaders.Bleed);
         _preview = new GlProgram(Shaders.PreviewVertex, Shaders.PreviewFragment);
@@ -177,6 +180,7 @@ internal sealed class SkinRenderer
         g.SpecT = Target(size, PixelInternalFormat.Rgba8);
         g.SssT = Target(size, PixelInternalFormat.Rgba8);
         g.RfaosT = Target(size, PixelInternalFormat.Rgba8);
+        g.Shell = Target(size, PixelInternalFormat.Rgba8);
     }
 
     private static int Target(int size, PixelInternalFormat format)
@@ -304,6 +308,30 @@ internal sealed class SkinRenderer
         (g.Albedo, g.Normal, g.Spec, g.Sss, g.Rfaos) = (a[0], a[1], a[2], a[3], a[4]);
         (g.AlbedoB, g.NormalB, g.SpecB, g.SssB, g.RfaosB) = (b[0], b[1], b[2], b[3], b[4]);
 
+        // 4. fur shell texture (strand heights and fur colour), from the base skin's settings
+        g.HasShell = s.Fur.Enabled;
+        if (g.HasShell)
+        {
+            BindTargets(g.Shell);
+            GL.ClearColor(0, 0, 0, 0);
+            GL.Clear(ClearBufferMask.ColorBufferBit);
+            _shell!.Use();
+            SetLayerUniforms(_shell, s);
+            _shell.Set("uFootprint", _footprint);
+            var unit = 0;
+            foreach (var (name, layer) in Masks)
+            {
+                var tex = Image(images, layer(s).MaskFor(g.Name));
+                _shell.Texture("m" + name, unit++, tex);
+                _shell.Set("h" + name, tex != 0 ? 1 : 0);
+            }
+            _shell.Set("hExAlbedo", 0); _shell.Set("hExSpec", 0); _shell.Set("hExSss", 0);
+            DrawShapes(g);
+            GL.BindTexture(TextureTarget.Texture2D, g.Shell);
+            GL.GenerateMipmap(GenerateMipmapTarget.Texture2D);
+            GL.TexParameter(TextureTarget.Texture2D, TextureParameterName.TextureMinFilter, (int)TextureMinFilter.LinearMipmapLinear);
+        }
+
         foreach (var t in a)
         {
             GL.BindTexture(TextureTarget.Texture2D, t);
@@ -324,9 +352,9 @@ internal sealed class SkinRenderer
         _generate.Set("uFootprint", _footprint);
         var ex = s.StartFromExisting;
         var useEx = ex.Enabled;
-        _generate.Texture("uExAlbedo", 11, useEx ? g.ExAlbedo : 0); _generate.Set("hExAlbedo", useEx && g.ExAlbedo != 0 ? 1 : 0);
-        _generate.Texture("uExSpec", 12, useEx ? g.ExSpec : 0); _generate.Set("hExSpec", useEx && g.ExSpec != 0 ? 1 : 0);
-        _generate.Texture("uExSss", 13, useEx ? g.ExSss : 0); _generate.Set("hExSss", useEx && g.ExSss != 0 ? 1 : 0);
+        _generate.Texture("uExAlbedo", 12, useEx ? g.ExAlbedo : 0); _generate.Set("hExAlbedo", useEx && g.ExAlbedo != 0 ? 1 : 0);
+        _generate.Texture("uExSpec", 13, useEx ? g.ExSpec : 0); _generate.Set("hExSpec", useEx && g.ExSpec != 0 ? 1 : 0);
+        _generate.Texture("uExSss", 14, useEx ? g.ExSss : 0); _generate.Set("hExSss", useEx && g.ExSss != 0 ? 1 : 0);
         _generate.Set("uExMix", new Vector3(ex.Diffuse, ex.Specular, ex.Subsurface));
         var unit = 0;
         foreach (var (name, layer) in Masks)
@@ -367,6 +395,12 @@ internal sealed class SkinRenderer
         Spot("Freck", s.Freckles); Spot("Mole", s.Moles); Spot("Pimple", s.Pimples); Spot("Blem", s.Blemishes); Spot("RedSpot", s.RedSpots);
         p.Set("uVeinColor", C(s.Veins.Color));
         p.Set("uVeins", new Vector3(s.Veins.Strength, s.Veins.Scale, s.Veins.Enabled ? 1 : 0));
+        p.Set("uVeinBump", s.Veins.Enabled ? s.Veins.Bump : 0f);
+        var f = s.Fur;
+        p.Set("uFurColor", C(f.Color)); p.Set("uFurPatternColor", C(f.PatternColor)); p.Set("uFurBellyColor", C(f.BellyColor));
+        p.Set("uFur", new Vector4(f.Enabled ? 1 : 0, f.ColorStrength, f.ColorVariation, f.Density));
+        p.Set("uFur2", new Vector4(f.StrandLength, f.Spread, f.NormalStrength, f.LightBelly));
+        p.Set("uFur3", new Vector4(f.Stripes, f.StripeScale, f.Spots, f.SpotScale));
         p.Set("uMaterial", new Vector4(s.Material.Specular, s.Material.SpecularVariation, s.Material.Enabled ? s.Material.Subsurface : 0f, 0));
         p.Set("uSssColor", C(s.Material.SubsurfaceColor));
         p.Set("uPbr", new Vector4(s.Material.Roughness, s.Material.RoughnessVariation, s.Material.Enabled ? s.Material.Fuzz : 0f, s.Material.CavityOcclusion));
@@ -417,6 +451,7 @@ internal sealed class SkinRenderer
                 _preview.Texture("uSpec", 2, g.Spec);
                 _preview.Texture("uSss", 3, g.Sss);
                 _preview.Texture("uRfaos", 4, g.Rfaos);
+                _preview.Texture("uShell", 6, g.HasShell ? g.Shell : 0);
             }
             var paint = showPaint && _paint.TryGetValue(g.Name, out var p) ? p.Texture : 0;
             _preview.Texture("uPaint", 5, paint);
@@ -447,6 +482,7 @@ internal sealed class SkinRenderer
             if (!keepAlpha) for (var i = 3; i < data.Length; i += 4) data[i] = 255;
             return data;
         }
-        return new GeneratedTextures(g.Size, Get(g.Albedo), Get(g.Normal), Get(g.Spec), Get(g.Sss), Get(g.Rfaos, keepAlpha: true));
+        return new GeneratedTextures(g.Size, Get(g.Albedo), Get(g.Normal), Get(g.Spec), Get(g.Sss), Get(g.Rfaos, keepAlpha: true),
+            g.HasShell ? Get(g.Shell, keepAlpha: true) : null);
     }
 }
