@@ -23,7 +23,14 @@ public sealed class Mo2Instance
         "Skyrim.esm", "Update.esm", "Dawnguard.esm", "HearthFires.esm", "Dragonborn.esm",
     };
 
-    public Mo2Instance(string root, string? profile = null)
+    /// <summary>File the patcher leaves in its output folder; a mod containing it is never read as input.</summary>
+    public const string OutputMarker = "Skin texture tool patch output.txt";
+
+    /// <summary>Enabled mods left out because they hold this tool's own output.</summary>
+    public IReadOnlyList<string> SkippedOutputMods { get; private set; } = Array.Empty<string>();
+
+    /// <param name="exclude">Folders never read (the patcher's own output folder).</param>
+    public Mo2Instance(string root, string? profile = null, IEnumerable<string>? exclude = null)
     {
         Root = root;
         var ini = ReadIni(Path.Combine(root, "ModOrganizer.ini"));
@@ -53,7 +60,16 @@ public sealed class Mo2Instance
             }
         }
         Add(GameData);
-        foreach (var mod in enabled) Add(Path.Combine(modsDir, mod));
+        // the patcher's own output must never become its input
+        var excluded = (exclude ?? Array.Empty<string>()).Select(e => Path.GetFullPath(e).TrimEnd(Path.DirectorySeparatorChar)).ToHashSet(StringComparer.OrdinalIgnoreCase);
+        var skipped = new List<string>();
+        foreach (var mod in enabled)
+        {
+            var folder = Path.Combine(modsDir, mod);
+            if (excluded.Contains(Path.GetFullPath(folder).TrimEnd(Path.DirectorySeparatorChar)) || File.Exists(Path.Combine(folder, OutputMarker))) { skipped.Add(mod); continue; }
+            Add(folder);
+        }
+        SkippedOutputMods = skipped;
         Add(overwrite);
         Files = files;
 

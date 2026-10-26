@@ -112,7 +112,9 @@ public static class NeckReshaper
                     dist[w] = dw; queue.Enqueue(w, dw);
                 }
             }
-            if (found is { } anchor) merges[v] = anchor;
+            // only true in-between vertices (about half an edge from their anchor); a vertex further along would
+            // drag across its neighbours when merged, so it's snapped and tucked instead
+            if (found is { } anchor && (V(hp, anchor) - V(hp, v)).LengthSq < 0.8f * 0.8f) merges[v] = anchor;
         }
         if (!merge) merges.Clear();
         else if (only != null)
@@ -157,7 +159,8 @@ public static class NeckReshaper
             moved++; largest = MathF.Max(largest, move);
             result[v * 3] = np.X; result[v * 3 + 1] = np.Y; result[v * 3 + 2] = np.Z;
         }
-        if (merges.Count > 0) RelaxAboveSeam(head, result, seamVerts);
+        if (merges.Count > 0) RelaxAboveSeam(head, result, seamVerts, headEdges.SelectMany(e => new[] { e.A, e.B }).ToHashSet());
+        Untangle(head, result, seamVerts, merges);
         return new Result(result, moved, seam.Count, largest, merges);
     }
 
@@ -166,7 +169,9 @@ public static class NeckReshaper
     /// joining it to the row above skewed (visible facets). A few rounds of smoothing on the rows just above the
     /// seam, fading out with distance and keeping the seam itself fixed, even them out.
     /// </summary>
-    private static void RelaxAboveSeam(ShapeData head, float[] pos, HashSet<int> seam, float reach = 1.5f, int rounds = 6)
+    /// <param name="openEdge">The head's open-edge vertices: where the edge leaves the body (up the back of the neck)
+    /// they have neighbours on one side only, and smoothing would pull them inward and fold their triangles.</param>
+    private static void RelaxAboveSeam(ShapeData head, float[] pos, HashSet<int> seam, HashSet<int> openEdge, float reach = 1.5f, int rounds = 6)
     {
         var neighbours = new Dictionary<int, HashSet<int>>();
         var I = head.Indices;
@@ -181,7 +186,7 @@ public static class NeckReshaper
         var weight = new Dictionary<int, float>();
         foreach (var v in neighbours.Keys)
         {
-            if (seam.Contains(v)) continue;
+            if (seam.Contains(v) || openEdge.Contains(v)) continue;
             var p = V(pos, v);
             var d = seamPoints.Min(q => MathF.Sqrt((q - p).LengthSq));
             if (d < reach) weight[v] = 0.5f * (1 - d / reach);
@@ -207,6 +212,36 @@ public static class NeckReshaper
                 avg = avg * (1f / group.Count());
                 foreach (var v in group) { pos[v * 3] = avg.X; pos[v * 3 + 1] = avg.Y; pos[v * 3 + 2] = avg.Z; }
             }
+        }
+    }
+
+    /// <summary>
+    /// Where the bend still flips or flattens a triangle (typically where the head's edge turns away from the
+    /// body and the body's surface direction points steeply up), that triangle's free vertices are eased back
+    /// towards where they started until nothing is folded. Seam vertices stay put; triangles collapsed on purpose
+    /// by a merge don't count.
+    /// </summary>
+    private static void Untangle(ShapeData head, float[] pos, HashSet<int> seam, IReadOnlyDictionary<int, int> merges, int rounds = 12)
+    {
+        var orig = head.Positions; var I = head.Indices;
+        for (var r = 0; r < rounds; r++)
+        {
+            var bad = new HashSet<int>();
+            for (var t = 0; t + 2 < I.Length; t += 3)
+            {
+                int a = (int)I[t], b = (int)I[t + 1], c = (int)I[t + 2];
+                if ((merges.TryGetValue(a, out var ia) && (ia == b || ia == c)) || (merges.TryGetValue(b, out var ib) && (ib == a || ib == c))
+                    || (merges.TryGetValue(c, out var ic) && (ic == a || ic == b))) continue;
+                var fo = Vec.Cross(V(orig, b) - V(orig, a), V(orig, c) - V(orig, a));
+                var fn = Vec.Cross(V(pos, b) - V(pos, a), V(pos, c) - V(pos, a));
+                var lo = MathF.Sqrt(fo.LengthSq); var ln = MathF.Sqrt(fn.LengthSq);
+                if (lo < 1e-9f) continue;
+                if (Vec.Dot(fo, fn) < 0 || ln < lo * 0.2f)
+                    foreach (var v in new[] { a, b, c }) if (!seam.Contains(v)) bad.Add(v);
+            }
+            if (bad.Count == 0) return;
+            foreach (var v in bad)
+                for (var k = 0; k < 3; k++) pos[v * 3 + k] += (orig[v * 3 + k] - pos[v * 3 + k]) * 0.5f;
         }
     }
 
@@ -274,6 +309,7 @@ public static class NeckReshaper
         public static Vec operator -(Vec a, Vec b) => new(a.X - b.X, a.Y - b.Y, a.Z - b.Z);
         public static Vec operator *(Vec a, float s) => new(a.X * s, a.Y * s, a.Z * s);
         public static float Dot(Vec a, Vec b) => a.X * b.X + a.Y * b.Y + a.Z * b.Z;
+        public static Vec Cross(Vec a, Vec b) => new(a.Y * b.Z - a.Z * b.Y, a.Z * b.X - a.X * b.Z, a.X * b.Y - a.Y * b.X);
         public float LengthSq => Dot(this, this);
         public Vec Normalized() { var l = MathF.Sqrt(LengthSq); return l > 0 ? this * (1f / l) : this; }
     }

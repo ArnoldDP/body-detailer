@@ -41,7 +41,7 @@ public static class NpcBatch
     {
         var started = DateTime.Now;
         progress?.Invoke("Reading the MO2 instance…");
-        var mo2 = new Mo2Instance(mo2Folder);
+        var mo2 = new Mo2Instance(mo2Folder, exclude: output == null ? null : new[] { output });
         var styles = new Cache<IModMasterStyledGetter, ModKey>(m => m.ModKey);
         var mods = new List<ISkyrimModGetter>();
         foreach (var plugin in mo2.Plugins)
@@ -56,8 +56,13 @@ public static class NpcBatch
         var cache = mods.ToImmutableLinkCache();
         using var data = new VirtualData(mo2);
         var patcher = new FaceGenPatcher(data, cache) { Band = band };
-        // the tool's own output must never be read back as input
         var outputFull = output == null ? null : Path.GetFullPath(output);
+        if (outputFull != null)
+        {
+            Directory.CreateDirectory(outputFull);
+            File.WriteAllText(Path.Combine(outputFull, Mo2Instance.OutputMarker),
+                "Written by the Skin texture tool's load order patcher. Mods containing this file are never read as input.");
+        }
 
         int npcs = 0, fitted = 0, written = 0, folded = 0, gentler = 0, merged = 0; double largest = 0;
         var skipped = new Dictionary<string, int>(); var byPlugin = new Dictionary<string, int>(); var notes = new List<string>();
@@ -76,11 +81,11 @@ public static class NpcBatch
             FaceGenPatcher.Outcome? o = null; var folds = 0;
             try
             {
-                foreach (var (b, merge) in new[] { (band, true), (band * 0.6f, true), (band * 0.35f, true), (band * 0.35f, false) })
+                foreach (var (b, merge) in new[] { (band, true), (band * 0.6f, true), (band * 0.35f, true), (band * 0.15f, true), (band * 0.35f, false), (band * 0.12f, false) })
                 {
                     o = patcher.Fit(npc, b, merge ? null : new Dictionary<int, int>());
                     if (o.Skipped != null) break;
-                    folds = Folds(o.Head.Positions, o.Patched, o.Head.Indices);
+                    folds = Folds(o.Head.Positions, o.Patched, o.Head.Indices, o.Merges);
                     if (folds == 0) { if (b < band) gentler++; break; }
                 }
             }
@@ -107,17 +112,22 @@ public static class NpcBatch
             }
         }
         notes.Insert(0, $"{merged} heads had their extra neck vertices merged into body-matching neighbours (no T-junctions left).");
+        foreach (var m in mo2.SkippedOutputMods) notes.Insert(0, $"Not read as input (holds this tool's output): {m}");
         if (gentler > 0) notes.Insert(0, $"{gentler} heads needed a shorter bend to avoid folding a triangle.");
         return new Summary(npcs, fitted, written, skipped, byPlugin, folded, largest, DateTime.Now - started, notes);
     }
 
     private static void Count(Dictionary<string, int> d, string key) => d[key] = d.GetValueOrDefault(key) + 1;
 
-    private static int Folds(float[] a, float[] b, uint[] idx)
+    private static int Folds(float[] a, float[] b, uint[] idx, IReadOnlyDictionary<int, int>? merges = null)
     {
         var n = 0;
         for (var t = 0; t + 2 < idx.Length; t += 3)
         {
+            // triangles collapsed on purpose: a merged vertex now sits on its partner in the same triangle
+            if (merges is { Count: > 0 } && Enumerable.Range(0, 3).Any(k =>
+                    merges.TryGetValue((int)idx[t + k], out var into) && (idx[t] == into || idx[t + 1] == into || idx[t + 2] == into)))
+                continue;
             var fa = Face(a, idx, t); var fb = Face(b, idx, t);
             var la = Math.Sqrt(fa.X * fa.X + fa.Y * fa.Y + fa.Z * fa.Z); var lb = Math.Sqrt(fb.X * fb.X + fb.Y * fb.Y + fb.Z * fb.Z);
             if (la < 1e-12 || lb < 1e-12) continue;
