@@ -5,6 +5,7 @@ using Mutagen.Bethesda.Plugins.Binary.Parameters;
 using Mutagen.Bethesda.Plugins.Records;
 using Mutagen.Bethesda.Skyrim;
 using Noggog;
+using SkinTextureTool.Core.NeckFix;
 
 namespace SkinTextureTool.Core.Patcher;
 
@@ -58,21 +59,26 @@ public static class NpcBatch
         // the tool's own output must never be read back as input
         var outputFull = output == null ? null : Path.GetFullPath(output);
 
-        int npcs = 0, fitted = 0, written = 0, folded = 0, gentler = 0; double largest = 0;
+        int npcs = 0, fitted = 0, written = 0, folded = 0, gentler = 0, merged = 0; double largest = 0;
         var skipped = new Dictionary<string, int>(); var byPlugin = new Dictionary<string, int>(); var notes = new List<string>();
+
+        // Each head merges its own extra neck vertices into their body-matching neighbours. The .tri files its face
+        // shares with other NPCs are left alone: expressions don't move the neck edge (under 0.001 units in the High
+        // Poly Head expressions), and the one morph that does, SkinnyMorph, is how the engine applies weight to a
+        // head built at runtime — the player's — while FaceGen heads are already baked for their NPC's weight.
         foreach (var npc in Enumerable.Reverse(mods).Npc().WinningOverrides())
         {
             if (!npc.Template.IsNull && npc.Configuration.TemplateFlags.HasFlag(NpcConfiguration.TemplateFlag.Traits)) continue;
             if (!data.Exists(FaceGenPatcher.FaceGenPath(npc))) continue;
             npcs++;
             if (npcs % 100 == 0) progress?.Invoke($"Fitting FaceGen heads… {npcs}");
-            // a tight neck that would fold gets a gentler (shorter) bend before it's given up on
+            // a tight neck that would fold gets a gentler (shorter) bend, then no merging, before it's given up on
             FaceGenPatcher.Outcome? o = null; var folds = 0;
             try
             {
-                foreach (var b in new[] { band, band * 0.6f, band * 0.35f })
+                foreach (var (b, merge) in new[] { (band, true), (band * 0.6f, true), (band * 0.35f, true), (band * 0.35f, false) })
                 {
-                    o = patcher.Fit(npc, b);
+                    o = patcher.Fit(npc, b, merge ? null : new Dictionary<int, int>());
                     if (o.Skipped != null) break;
                     folds = Folds(o.Head.Positions, o.Patched, o.Head.Indices);
                     if (folds == 0) { if (b < band) gentler++; break; }
@@ -91,6 +97,7 @@ public static class NpcBatch
                 continue;
             }
             fitted++;
+            if (o.Merges is { Count: > 0 }) merged++;
             largest = Math.Max(largest, o.LargestMove);
             Count(byPlugin, npc.FormKey.ModKey.FileName);
             if (outputFull != null)
@@ -99,6 +106,7 @@ public static class NpcBatch
                 catch (Exception ex) { notes.Add($"{o.Npc}: couldn't write: {ex.Message}"); }
             }
         }
+        notes.Insert(0, $"{merged} heads had their extra neck vertices merged into body-matching neighbours (no T-junctions left).");
         if (gentler > 0) notes.Insert(0, $"{gentler} heads needed a shorter bend to avoid folding a triangle.");
         return new Summary(npcs, fitted, written, skipped, byPlugin, folded, largest, DateTime.Now - started, notes);
     }

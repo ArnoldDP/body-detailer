@@ -129,14 +129,15 @@ public static class TriFile
     /// Copies <paramref name="source"/> to <paramref name="target"/> with the base vertices replaced, and each
     /// merged vertex given its partner's offset in every morph; false if the vertex counts differ.
     /// </summary>
-    public static bool PatchBase(string source, string target, float[] positions, IReadOnlyDictionary<int, int>? merges = null)
+    public static bool PatchBase(string source, string target, float[]? positions, IReadOnlyDictionary<int, int>? merges = null, int? vertexCount = null)
     {
         var data = File.ReadAllBytes(source);
         if (data.Length < HeaderSize || System.Text.Encoding.ASCII.GetString(data, 0, 8) != "FRTRI003") return false;
         var count = BitConverter.ToInt32(data, 8);
-        if (count * 3 != positions.Length) return false;
-        for (var i = 0; i < positions.Length; i++)
-            BitConverter.TryWriteBytes(data.AsSpan(HeaderSize + i * 4, 4), positions[i]);
+        if (positions != null ? count * 3 != positions.Length : vertexCount != null && count != vertexCount) return false;
+        if (positions != null)
+            for (var i = 0; i < positions.Length; i++)
+                BitConverter.TryWriteBytes(data.AsSpan(HeaderSize + i * 4, 4), positions[i]);
         if (merges is { Count: > 0 } && !CopyMorphOffsets(data, merges))
             throw new InvalidDataException($"{Path.GetFileName(source)} has a layout this tool can't patch morphs in.");
         Directory.CreateDirectory(Path.GetDirectoryName(target)!);

@@ -16,7 +16,7 @@ namespace SkinTextureTool.Core.Patcher;
 public sealed class FaceGenPatcher
 {
     public sealed record Outcome(string Npc, string FaceGenPath, string Body, float Weight, int SeamVertices, int Moved, float LargestMove,
-        ShapeData Head, float[] Patched, ShapeData BodyShape, string? Skipped);
+        ShapeData Head, float[] Patched, ShapeData BodyShape, string? Skipped, IReadOnlyDictionary<int, int>? Merges = null);
 
     private readonly VirtualData _data;
     private readonly ILinkCache<ISkyrimMod, ISkyrimModGetter> _cache;
@@ -54,7 +54,9 @@ public sealed class FaceGenPatcher
 
     public Outcome Fit(INpcGetter npc) => Fit(npc, Band);
 
-    public Outcome Fit(INpcGetter npc, float band)
+    /// <param name="only">Merge exactly these vertex pairs (shared by every NPC using the same .tri files); null merges
+    /// whatever this head needs; an empty map merges nothing (snap and tuck).</param>
+    public Outcome Fit(INpcGetter npc, float band, IReadOnlyDictionary<int, int>? only = null)
     {
         var name = npc.EditorID ?? npc.FormKey.ToString();
         var faceGen = FaceGenPath(npc);
@@ -70,16 +72,44 @@ public sealed class FaceGenPatcher
         if (body == null) return Skip($"body {bodyPath} couldn't be read");
         var head = BodyMesh.Load(file).Where(s => s.ModelSpaceNormals).MaxBy(s => s.VertexCount);
         if (head == null) return Skip("no head shape in the FaceGen file");
-        var r = NeckReshaper.Reshape(head, body, band, merge: false);
+        var merge = only == null || only.Count > 0;
+        var r = NeckReshaper.Reshape(head, body, band, merge: merge, only: only);
         if (r.SeamVertices < 12) return Skip($"neck doesn't meet the body ({r.SeamVertices} edge vertices on it)", head);
-        return new Outcome(name, faceGen, bodyPath, weight, r.SeamVertices, r.MovedVertices, r.LargestMove, head, r.Positions, body, null);
+        return new Outcome(name, faceGen, bodyPath, weight, r.SeamVertices, r.MovedVertices, r.LargestMove, head, r.Positions, body, null, r.Merges);
     }
 
     /// <summary>Writes a fitted head into <paramref name="outputRoot"/> at its game path.</summary>
     public void Write(Outcome o, string outputRoot)
     {
         var source = _data.Materialize(o.FaceGenPath)!;
-        HeadExporter.WriteNif(source, o.Head.Name, o.Patched, Path.Combine(outputRoot, o.FaceGenPath));
+        HeadExporter.WriteNif(source, o.Head.Name, o.Patched, Path.Combine(outputRoot, o.FaceGenPath), o.Merges);
+    }
+
+    /// <summary>
+    /// The .tri files the NPC's face uses at runtime (its own face part, else its race's default), as data paths
+    /// that exist in the load order. NPCs sharing these must merge the same vertices.
+    /// </summary>
+    public List<string> FaceTris(INpcGetter npc)
+    {
+        var female = npc.Configuration.Flags.HasFlag(NpcConfiguration.Flag.Female);
+        IHeadPartGetter? face = null;
+        foreach (var link in npc.HeadParts)
+            if (link.TryResolve(_cache, out var hp) && hp.Type == HeadPart.TypeEnum.Face) { face = hp; break; }
+        if (face == null && npc.Race.TryResolve(_cache, out var race))
+        {
+            var data = female ? race.HeadData?.Female : race.HeadData?.Male;
+            foreach (var p in data?.HeadParts ?? Array.Empty<IHeadPartReferenceGetter>())
+                if (p.Head.TryResolve(_cache, out var hp) && hp.Type == HeadPart.TypeEnum.Face) { face = hp; break; }
+        }
+        var tris = new List<string>();
+        foreach (var part in face?.Parts ?? Array.Empty<IPartGetter>())
+        {
+            if (string.IsNullOrEmpty(part.FileName)) continue;
+            var path = MeshPath(part.FileName!);
+            if (_data.Exists(path)) tris.Add(path.ToLowerInvariant());
+        }
+        tris.Sort(StringComparer.Ordinal);
+        return tris;
     }
 
     /// <summary>The body's skin shape blended between its _0 and _1 meshes by weight (0..1).</summary>

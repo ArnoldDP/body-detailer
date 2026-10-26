@@ -20,7 +20,10 @@ public static class NeckReshaper
     /// match, as the player export does). Off, they're snapped onto the body's edge and tucked a hair under it
     /// instead, which leaves every .tri valid — the choice for NPC FaceGen heads.
     /// </param>
-    public static Result Reshape(ShapeData head, ShapeData body, float band = 4f, float reach = 0.1f, bool merge = true)
+    /// <param name="only">When given, merge exactly these pairs (where they're still valid) instead of choosing:
+    /// heads sharing .tri files must all merge the same vertices.</param>
+    public static Result Reshape(ShapeData head, ShapeData body, float band = 4f, float reach = 0.1f, bool merge = true,
+        IReadOnlyDictionary<int, int>? only = null)
     {
         var hp = head.Positions; var bp = body.Positions;
         var headEdges = BoundaryEdges(head);
@@ -112,6 +115,9 @@ public static class NeckReshaper
             if (found is { } anchor) merges[v] = anchor;
         }
         if (!merge) merges.Clear();
+        else if (only != null)
+            merges = only.Where(kv => seamVerts.Contains(kv.Key) && anchorPos.ContainsKey(kv.Value) && !anchorPos.ContainsKey(kv.Key))
+                .ToDictionary(kv => kv.Key, kv => kv.Value);
 
         var moved = 0; var largest = 0f;
         var seamSet = seam.Select(s => s.V).ToHashSet();
@@ -151,7 +157,57 @@ public static class NeckReshaper
             moved++; largest = MathF.Max(largest, move);
             result[v * 3] = np.X; result[v * 3 + 1] = np.Y; result[v * 3 + 2] = np.Z;
         }
+        if (merges.Count > 0) RelaxAboveSeam(head, result, seamVerts);
         return new Result(result, moved, seam.Count, largest, merges);
+    }
+
+    /// <summary>
+    /// Merging slides each in-between edge vertex along the seam onto its neighbour, which leaves the triangles
+    /// joining it to the row above skewed (visible facets). A few rounds of smoothing on the rows just above the
+    /// seam, fading out with distance and keeping the seam itself fixed, even them out.
+    /// </summary>
+    private static void RelaxAboveSeam(ShapeData head, float[] pos, HashSet<int> seam, float reach = 1.5f, int rounds = 6)
+    {
+        var neighbours = new Dictionary<int, HashSet<int>>();
+        var I = head.Indices;
+        for (var t = 0; t + 2 < I.Length; t += 3)
+            for (var k = 0; k < 3; k++)
+            {
+                int a = (int)I[t + k], b = (int)I[t + (k + 1) % 3];
+                (neighbours.TryGetValue(a, out var na) ? na : neighbours[a] = new()).Add(b);
+                (neighbours.TryGetValue(b, out var nb) ? nb : neighbours[b] = new()).Add(a);
+            }
+        var seamPoints = seam.Select(v => V(pos, v)).ToList();
+        var weight = new Dictionary<int, float>();
+        foreach (var v in neighbours.Keys)
+        {
+            if (seam.Contains(v)) continue;
+            var p = V(pos, v);
+            var d = seamPoints.Min(q => MathF.Sqrt((q - p).LengthSq));
+            if (d < reach) weight[v] = 0.5f * (1 - d / reach);
+        }
+        for (var r = 0; r < rounds; r++)
+        {
+            var next = new Dictionary<int, Vec>();
+            foreach (var (v, w) in weight)
+            {
+                Vec sum = default; var n = 0;
+                // same-position duplicates (UV seams) share one point, so average by distinct positions
+                foreach (var u in neighbours[v]) { sum += V(pos, u); n++; }
+                if (n == 0) continue;
+                var p = V(pos, v);
+                next[v] = p + (sum * (1f / n) - p) * w;
+            }
+            foreach (var (v, p) in next) { pos[v * 3] = p.X; pos[v * 3 + 1] = p.Y; pos[v * 3 + 2] = p.Z; }
+            // vertices at the same point must stay together
+            foreach (var group in weight.Keys.GroupBy(v => (MathF.Round(head.Positions[v * 3] * 1000), MathF.Round(head.Positions[v * 3 + 1] * 1000), MathF.Round(head.Positions[v * 3 + 2] * 1000))))
+            {
+                if (group.Count() < 2) continue;
+                Vec avg = default; foreach (var v in group) avg += V(pos, v);
+                avg = avg * (1f / group.Count());
+                foreach (var v in group) { pos[v * 3] = avg.X; pos[v * 3 + 1] = avg.Y; pos[v * 3 + 2] = avg.Z; }
+            }
+        }
     }
 
     private static List<(int A, int B)> BoundaryEdges(ShapeData s)
