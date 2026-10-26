@@ -19,6 +19,7 @@ public static class NpcBatch
         int Folded, double LargestMove, TimeSpan Took, List<string> Notes)
     {
         public HeadPartBatch.Outcome? Heads { get; init; }
+        public LimbBatch.Outcome? Limbs { get; init; }
 
         public string ToText()
         {
@@ -28,8 +29,14 @@ public static class NpcBatch
                 sb.AppendLine($"PLAYER HEADS: {Heads.Heads} playable head mesh(es), {Heads.Written} written, {Heads.Tris} .tri file(s) patched to match.");
                 foreach (var l in Heads.Lines) sb.AppendLine("  " + l);
                 sb.AppendLine();
-                sb.AppendLine("NPC FACEGEN HEADS:");
             }
+            if (Limbs != null)
+            {
+                sb.AppendLine($"WRISTS AND ANKLES: {Limbs.Meshes} hands/feet mesh(es) across the races' skins, {Limbs.Written} weight variant(s) written.");
+                foreach (var l in Limbs.Lines) sb.AppendLine("  " + l);
+                sb.AppendLine();
+            }
+            if (Heads != null || Limbs != null) sb.AppendLine("NPC FACEGEN HEADS:");
             sb.AppendLine($"{Npcs} NPCs with their own FaceGen head; {Fitted} fitted to their body, {Written} written ({Took.TotalSeconds:0} s).");
             sb.AppendLine($"Largest vertex move {LargestMove:0.00} units; {Folded} heads left out because even a short bend would fold a triangle.");
             sb.AppendLine("Skipped:");
@@ -46,7 +53,9 @@ public static class NpcBatch
     }
 
     /// <param name="output">Folder standing in for Data; null for a dry run.</param>
-    public static Summary Run(string mo2Folder, string? output, float band = 4f, Action<string>? progress = null)
+    /// <param name="band">How far up the neck heads are bent to follow the body.</param>
+    /// <param name="limbBand">The same for hands and feet at the wrists and ankles; 0 leaves them alone.</param>
+    public static Summary Run(string mo2Folder, string? output, float band = 4f, Action<string>? progress = null, float limbBand = 3f)
     {
         var started = DateTime.Now;
         progress?.Invoke("Reading the MO2 instance…");
@@ -82,6 +91,7 @@ public static class NpcBatch
         // Poly Head expressions), and the one morph that does, SkinnyMorph, is how the engine applies weight to a
         // head built at runtime — the player's — while FaceGen heads are already baked for their NPC's weight.
         var heads = HeadPartBatch.Run(priority, cache, data, patcher, outputFull, band, progress);
+        var limbs = limbBand > 0 ? LimbBatch.Run(priority, cache, data, patcher, outputFull, limbBand, progress) : null;
         foreach (var npc in priority.Npc().WinningOverrides())
         {
             if (!npc.Template.IsNull && npc.Configuration.TemplateFlags.HasFlag(NpcConfiguration.TemplateFlag.Traits)) continue;
@@ -125,7 +135,7 @@ public static class NpcBatch
         notes.Insert(0, $"{merged} heads had their extra neck vertices merged into body-matching neighbours (no T-junctions left).");
         foreach (var m in mo2.SkippedOutputMods) notes.Insert(0, $"Not read as input (holds this tool's output): {m}");
         if (gentler > 0) notes.Insert(0, $"{gentler} heads needed a shorter bend to avoid folding a triangle.");
-        return new Summary(npcs, fitted, written, skipped, byPlugin, folded, largest, DateTime.Now - started, notes) { Heads = heads };
+        return new Summary(npcs, fitted, written, skipped, byPlugin, folded, largest, DateTime.Now - started, notes) { Heads = heads, Limbs = limbs };
     }
 
     private static void Count(Dictionary<string, int> d, string key) => d[key] = d.GetValueOrDefault(key) + 1;

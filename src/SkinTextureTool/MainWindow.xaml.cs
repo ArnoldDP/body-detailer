@@ -53,6 +53,8 @@ public partial class MainWindow : Window
         public List<string> Nifs { get; set; } = new();
         public Dictionary<string, SliderSetChoice> SliderSets { get; set; } = new(StringComparer.OrdinalIgnoreCase);
         public string? Mo2Folder { get; set; }
+        public double NeckBand { get; set; } = 4;
+        public double LimbBand { get; set; } = 3;
     }
 
     public MainWindow()
@@ -77,6 +79,7 @@ public partial class MainWindow : Window
         Sliders.Choices = new Dictionary<string, SliderSetChoice>(state.SliderSets, StringComparer.OrdinalIgnoreCase);
         ExportFolderBox.Text = state.ExportFolder ?? "";
         if (string.IsNullOrEmpty(Patcher.Mo2Folder) && state.Mo2Folder != null) Patcher.Mo2Folder = state.Mo2Folder;
+        Patcher.Bands = (state.NeckBand, state.LimbBand);
         Settings.Changed += () => _debounce.Start();
         Settings.GeometryChanged += () => _geometryDebounce.Start();
         Sliders.Changed += () => _geometryDebounce.Start();
@@ -631,6 +634,8 @@ public partial class MainWindow : Window
                 Nifs = _nifs.Select(n => n.Path).ToList(),
                 SliderSets = Sliders.Choices,
                 Mo2Folder = string.IsNullOrWhiteSpace(Patcher.Mo2Folder) ? null : Patcher.Mo2Folder,
+                NeckBand = Patcher.Bands.Neck,
+                LimbBand = Patcher.Bands.Limb,
             };
             File.WriteAllText(StateFile, JsonSerializer.Serialize(state, new JsonSerializerOptions { WriteIndented = true }));
         }

@@ -30,7 +30,10 @@ public sealed class FaceGenPatcher
         $@"meshes\actors\character\facegendata\facegeom\{npc.FormKey.ModKey.FileName}\{npc.FormKey.ID:X8}.nif";
 
     /// <summary>The body mesh path a race's own skin uses for one sex.</summary>
-    public string? BodyPath(IRaceGetter race, bool female)
+    public string? BodyPath(IRaceGetter race, bool female) => PiecePath(race, female, BipedObjectFlag.Body);
+
+    /// <summary>The mesh path a race's own skin uses for one biped slot (body, hands, feet) and sex.</summary>
+    public string? PiecePath(IRaceGetter race, bool female, BipedObjectFlag slot)
     {
         if (!race.Skin.TryResolve(_cache, out var skin)) return null;
         var races = new List<Mutagen.Bethesda.Plugins.FormKey> { race.FormKey };
@@ -38,7 +41,7 @@ public sealed class FaceGenPatcher
         foreach (var link in skin.Armature)
         {
             if (!link.TryResolve(_cache, out var addon) || addon.BodyTemplate == null) continue;
-            if (!addon.BodyTemplate.FirstPersonFlags.HasFlag(BipedObjectFlag.Body)) continue;
+            if (!addon.BodyTemplate.FirstPersonFlags.HasFlag(slot)) continue;
             if (!races.Any(r => addon.Race.FormKey == r || addon.AdditionalRaces.Any(a => a.FormKey == r))) continue;
             var model = female ? addon.WorldModel?.Female?.File : addon.WorldModel?.Male?.File;
             if (model != null) return MeshPath(model.ToString());
@@ -163,7 +166,7 @@ public sealed class FaceGenPatcher
         return p.StartsWith(@"meshes\", StringComparison.OrdinalIgnoreCase) ? p : @"meshes\" + p;
     }
 
-    private static string Variant(string path, string suffix)
+    public static string Variant(string path, string suffix)
     {
         var stem = Path.GetFileNameWithoutExtension(path);
         if (stem.EndsWith("_0") || stem.EndsWith("_1")) stem = stem[..^2];

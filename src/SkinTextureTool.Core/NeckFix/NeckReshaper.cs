@@ -20,10 +20,11 @@ public static class NeckReshaper
     /// match, as the player export does). Off, they're snapped onto the body's edge and tucked a hair under it
     /// instead, which leaves every .tri valid — the choice for NPC FaceGen heads.
     /// </param>
+    /// <param name="projectToPlane">Bend onto the body's surface plane instead of straight on (better for hands and feet).</param>
     /// <param name="only">When given, merge exactly these pairs (where they're still valid) instead of choosing:
     /// heads sharing .tri files must all merge the same vertices.</param>
     public static Result Reshape(ShapeData head, ShapeData body, float band = 4f, float reach = 0.1f, bool merge = true,
-        IReadOnlyDictionary<int, int>? only = null)
+        IReadOnlyDictionary<int, int>? only = null, bool projectToPlane = false)
     {
         var hp = head.Positions; var bp = body.Positions;
         var headEdges = BoundaryEdges(head);
@@ -123,18 +124,24 @@ public static class NeckReshaper
 
         var moved = 0; var largest = 0f;
         var seamSet = seam.Select(s => s.V).ToHashSet();
+        // the body's surface direction at each seam point
+        var seamNormal = seam.Select(x => bodyNormal[bodyEdgeVerts.MinBy(j => (V(bp, j) - x.Target).LengthSq)]).ToArray();
         for (var v = 0; v < head.VertexCount; v++)
         {
             var p = V(hp, v);
-            // where the body's surface would carry on to, blended over nearby seam points
+            // where the body's surface would carry on to, blended over nearby seam points: either straight on along
+            // the body's surface direction (necks), or the vertex brought onto the body's surface plane, keeping
+            // where it is along and around the seam (narrow wrists and ankles, where going straight on overshoots)
             Vec q = default; float weights = 0, nearest = float.MaxValue;
-            foreach (var (_, target, up) in seam)
+            for (var k = 0; k < seam.Count; k++)
             {
+                var target = seam[k].Target;
                 var d = MathF.Sqrt((p - target).LengthSq);
                 nearest = MathF.Min(nearest, d);
                 if (d > band * 1.5f) continue;
                 var w = 1f / (d * d * d * d + 1e-6f);
-                q += (target + up * d) * w; weights += w;
+                var nb = seamNormal[k];
+                q += (projectToPlane ? p - nb * Vec.Dot(p - target, nb) : target + seam[k].Up * d) * w; weights += w;
             }
             Vec np;
             if (anchorPos.TryGetValue(v, out var exact)) np = exact;
