@@ -99,7 +99,7 @@ public sealed class NeckFixPanel : StackPanel
         return new ShapeData
         {
             Name = shape.Name, NifPath = shape.NifPath, Positions = r.Positions, Uvs = shape.Uvs, Indices = shape.Indices,
-            DiffusePath = shape.DiffusePath, ModelSpaceNormals = shape.ModelSpaceNormals,
+            DiffusePath = shape.DiffusePath, TexturePaths = shape.TexturePaths, ModelSpaceNormals = shape.ModelSpaceNormals,
         };
     }
 

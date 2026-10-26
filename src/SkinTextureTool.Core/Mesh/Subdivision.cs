@@ -68,7 +68,7 @@ public static class Subdivision
         var sub = new ShapeData
         {
             Name = shape.Name, NifPath = shape.NifPath, Positions = pos, Uvs = uv, Indices = idx,
-            DiffusePath = shape.DiffusePath, ModelSpaceNormals = shape.ModelSpaceNormals,
+            DiffusePath = shape.DiffusePath, TexturePaths = shape.TexturePaths, ModelSpaceNormals = shape.ModelSpaceNormals,
         };
         return (sub, new SurfaceFrames { Normals = nrm, Tangents = tan, Bitangents = bit, UvScales = scl });
     }
