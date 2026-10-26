@@ -102,6 +102,8 @@ internal static class Shaders
         // (strand length, spread, normal strength, light belly), (stripes, stripe scale, spots, spot scale)
         uniform vec3 uFurColor, uFurPatternColor, uFurBellyColor; uniform vec4 uFur, uFur2, uFur3;
         uniform sampler2D mFur; uniform int hFur;
+        // anatomical veins: their painted network (a soft tube profile), colour, (strength, bump, enabled)
+        uniform sampler2D uAnatNet; uniform int hAnatNet; uniform vec3 uAnatColor, uAnat;
         uniform vec4 uMaterial; uniform vec3 uSssColor; // spec, specVariation, subsurface, -
         uniform vec4 uPbr; // roughness, roughness variation, fuzz, cavity occlusion
         // the meshes' current textures to start from, with a strength each (diffuse, specular, subsurface)
@@ -168,6 +170,11 @@ internal static class Shaders
                 float v = pow(clamp(r, 0.0, 1.0), 40.0);
                 col = mix(col, uVeinColor, uVeins.x * v * mask(mVeins, hVeins));
                 height += v * uVeinBump * 0.03 * mask(mVeins, hVeins);
+            }
+            if (uAnat.z > 0.5 && hAnatNet == 1) {
+                float a = texture(uAnatNet, vUv).r;
+                col = mix(col, uAnatColor, uAnat.x * a);
+                height += sqrt(a) * uAnat.y * 0.03; // rounded, like a vein raising the skin
             }
             // moles: rare dark spots, slightly raised
             if (uMole.x > 0.0) {

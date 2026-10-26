@@ -10,6 +10,7 @@ using SkinTextureTool.Core.Export;
 using SkinTextureTool.Core.Generation;
 using SkinTextureTool.Core.Mesh;
 using SkinTextureTool.Imaging;
+using SkinTextureTool.Painting;
 using SkinTextureTool.Rendering;
 
 namespace SkinTextureTool;
@@ -33,6 +34,9 @@ public partial class MainWindow : Window
     private IReadOnlyList<string> _groups = Array.Empty<string>();
     /// <summary>Per texture group, a shape that uses it (for its NIF's texture paths).</summary>
     private Dictionary<string, ShapeData> _groupShapes = new(StringComparer.OrdinalIgnoreCase);
+    /// <summary>The mesh as loaded, by texture group (for the vein network), and the key it was last built for.</summary>
+    private IReadOnlyList<(string Name, IReadOnlyList<MeshInput> Shapes)> _meshGroups = Array.Empty<(string, IReadOnlyList<MeshInput>)>();
+    private string? _veinKey;
     private SkinTextureTool.Core.Patcher.VirtualData? _gameData;
     private string? _gameDataFolder;
 
@@ -352,6 +356,8 @@ public partial class MainWindow : Window
         Painter.SetMesh(groups);
         var names = groups.Select(g => g.Key).ToList();
         _groupShapes = groups.ToDictionary(g => g.Key, g => g.Item2[0].Shape, StringComparer.OrdinalIgnoreCase);
+        _meshGroups = groups.Select(g => (g.Key, g.Item2)).ToList();
+        _veinKey = null; // the mesh changed, so the vein network is laid out again
         if (!names.SequenceEqual(_groups))
         {
             _groups = names;
@@ -425,6 +431,7 @@ public partial class MainWindow : Window
                 var snapshot = Settings.Settings.Clone();
                 await EnsureImagesAsync(snapshot);
                 await EnsureExistingTexturesAsync(snapshot);
+                await EnsureVeinNetworkAsync(snapshot);
                 var size = PreviewSize;
                 var images = new Dictionary<string, int>(_imageTextures, StringComparer.OrdinalIgnoreCase);
                 await Preview.Run(() => Preview.Renderer.Generate(snapshot, size, images));
@@ -459,6 +466,25 @@ public partial class MainWindow : Window
         Regions.Settings = Settings.Settings;
         SaveState();
         Regenerate();
+    }
+
+    // ---------- anatomical veins ----------
+
+    /// <summary>Lays out and paints the anatomical vein network when it's on and its routes or the mesh changed.</summary>
+    private async Task EnsureVeinNetworkAsync(SkinSettings s)
+    {
+        var v = s.AnatomicalVeins;
+        if (!v.Enabled || _meshGroups.Count == 0) return;
+        const int size = 2048;
+        var key = $"{s.Seed}|{v.RouteKey}";
+        if (key == _veinKey) return;
+        Status("Laying out the vein network…");
+        var groups = _meshGroups; var seed = s.Seed;
+        var masks = await Task.Run(() => VeinNetwork.Build(groups, v, seed, size));
+        foreach (var (group, bytes) in masks)
+            await Preview.Run(() => Preview.Renderer.SetVeinNetwork(group, size, bytes));
+        _veinKey = key;
+        Status("Vein network ready.");
     }
 
     // ---------- starting from the meshes' current textures ----------
@@ -548,6 +574,9 @@ public partial class MainWindow : Window
         {
             var snapshot = Settings.Settings.Clone();
             await EnsureImagesAsync(snapshot);
+            // the textures to start from and the vein network have to be ready before export generates
+            await EnsureExistingTexturesAsync(snapshot);
+            await EnsureVeinNetworkAsync(snapshot);
             var images = new Dictionary<string, int>(_imageTextures, StringComparer.OrdinalIgnoreCase);
             var size = ExportSize;
             var rfaos = RfaosBox.IsChecked == true;

@@ -102,6 +102,32 @@ public sealed class VeinsLayer : Layer
 }
 
 /// <summary>
+/// The major superficial veins along their real routes: cephalic and basilic veins of the arms, the dorsal networks
+/// of the hands and feet, the great and small saphenous veins of the legs, the external jugular and the faint
+/// thoracoepigastric veins of the torso, with branches wandering off them.
+/// </summary>
+public sealed class AnatomicalVeinsLayer : Layer
+{
+    public AnatomicalVeinsLayer() => Enabled = false;
+    public Rgb Color { get; set; } = Rgb.FromHex("#5A6E9A");
+    [Range(0, 1)] public float Strength { get; set; } = 0.25f;
+    /// <summary>How far the veins stand out of the skin in the normal map.</summary>
+    [Range(0, 1)] public float Bump { get; set; } = 0.5f;
+    [Range(0.3f, 3)] public float Thickness { get; set; } = 1f;
+    [Range(0, 1)] public float Branching { get; set; } = 0.5f;
+    [Range(0, 2)] public float Wiggle { get; set; } = 0.6f;
+    public bool Arms { get; set; } = true;
+    public bool Hands { get; set; } = true;
+    public bool Legs { get; set; } = true;
+    public bool Feet { get; set; } = true;
+    public bool Neck { get; set; } = true;
+    public bool Torso { get; set; } = true;
+
+    /// <summary>The settings that change the network's routes (colour, strength and bump only change how it's drawn).</summary>
+    public string RouteKey => $"{Thickness:0.00}|{Branching:0.00}|{Wiggle:0.00}|{Arms}{Hands}{Legs}{Feet}{Neck}{Torso}";
+}
+
+/// <summary>
 /// Procedural fur: colour, patterns and strands in the regular textures, plus an optional shell texture
 /// (name_shell.dds next to the diffuse, with name_shell.json) for Bottled Shaders' fur shells. A mask per texture
 /// sets where fur grows (white = fur).
@@ -242,6 +268,7 @@ public sealed class SkinSettings
     public SpotLayer Blemishes { get; set; } = new() { Color = Rgb.FromHex("#B0605A"), Amount = 0.4f, Scale = 0.6f, Strength = 0.15f };
     public SpotLayer RedSpots { get; set; } = new() { Color = Rgb.FromHex("#C04844"), Amount = 0.2f, Scale = 1.5f, Strength = 0.2f };
     public VeinsLayer Veins { get; set; } = new();
+    public AnatomicalVeinsLayer AnatomicalVeins { get; set; } = new();
     public FurLayer Fur { get; set; } = new();
     public MaterialLayer Material { get; set; } = new();
     public NormalLayer Normals { get; set; } = new();

@@ -38,6 +38,8 @@ internal sealed class SkinRenderer
         public bool Ready;
         /// <summary>The meshes' current textures, uploaded when "start from existing" is on (0 when absent).</summary>
         public int ExAlbedo, ExNormal, ExSpec, ExSss;
+        /// <summary>The anatomical vein network painted for this group (0 when absent).</summary>
+        public int AnatVeins;
         public IEnumerable<int> All => new[]
         {
             Albedo, Height, Spec, Sss, Normal, Rfaos, AlbedoB, SpecB, SssB, NormalB, RfaosB, HeightB,
@@ -361,6 +363,8 @@ internal sealed class SkinRenderer
         _generate.Texture("uExSpec", 13, useEx ? g.ExSpec : 0); _generate.Set("hExSpec", useEx && g.ExSpec != 0 ? 1 : 0);
         _generate.Texture("uExSss", 14, useEx ? g.ExSss : 0); _generate.Set("hExSss", useEx && g.ExSss != 0 ? 1 : 0);
         _generate.Set("uExMix", new Vector3(ex.Diffuse, ex.Specular, ex.Subsurface));
+        _generate.Texture("uAnatNet", 15, g.AnatVeins);
+        _generate.Set("hAnatNet", g.AnatVeins != 0 ? 1 : 0);
         var unit = 0;
         foreach (var (name, layer) in Masks)
         {
@@ -401,6 +405,8 @@ internal sealed class SkinRenderer
         p.Set("uVeinColor", C(s.Veins.Color));
         p.Set("uVeins", new Vector3(s.Veins.Strength, s.Veins.Scale, s.Veins.Enabled ? 1 : 0));
         p.Set("uVeinBump", s.Veins.Enabled ? s.Veins.Bump : 0f);
+        p.Set("uAnatColor", C(s.AnatomicalVeins.Color));
+        p.Set("uAnat", new Vector3(s.AnatomicalVeins.Strength, s.AnatomicalVeins.Bump, s.AnatomicalVeins.Enabled ? 1 : 0));
         var f = s.Fur;
         p.Set("uFurColor", C(f.Color)); p.Set("uFurPatternColor", C(f.PatternColor)); p.Set("uFurBellyColor", C(f.BellyColor));
         p.Set("uFur", new Vector4(f.Enabled ? 1 : 0, f.ColorStrength, f.ColorVariation, f.Density));
@@ -466,6 +472,23 @@ internal sealed class SkinRenderer
     }
 
     public IReadOnlyList<string> GroupNames => _groups.Select(g => g.Name).ToList();
+
+    /// <summary>Uploads a group's anatomical vein network (8-bit greys, row 0 at v = 0).</summary>
+    public void SetVeinNetwork(string group, int size, byte[]? values)
+    {
+        var g = _groups.FirstOrDefault(x => x.Name == group);
+        if (g == null) return;
+        if (values == null) { if (g.AnatVeins != 0) GL.DeleteTexture(g.AnatVeins); g.AnatVeins = 0; return; }
+        if (g.AnatVeins == 0) g.AnatVeins = GL.GenTexture();
+        GL.BindTexture(TextureTarget.Texture2D, g.AnatVeins);
+        GL.PixelStore(PixelStoreParameter.UnpackAlignment, 1);
+        GL.TexImage2D(TextureTarget.Texture2D, 0, PixelInternalFormat.R8, size, size, 0, PixelFormat.Red, PixelType.UnsignedByte, values);
+        GL.PixelStore(PixelStoreParameter.UnpackAlignment, 4);
+        GL.TexParameter(TextureTarget.Texture2D, TextureParameterName.TextureMinFilter, (int)TextureMinFilter.Linear);
+        GL.TexParameter(TextureTarget.Texture2D, TextureParameterName.TextureMagFilter, (int)TextureMagFilter.Linear);
+        GL.TexParameter(TextureTarget.Texture2D, TextureParameterName.TextureWrapS, (int)TextureWrapMode.ClampToEdge);
+        GL.TexParameter(TextureTarget.Texture2D, TextureParameterName.TextureWrapT, (int)TextureWrapMode.ClampToEdge);
+    }
 
     /// <summary>Sets a group's existing textures (image-texture ids, 0 for none).</summary>
     public void SetExisting(string group, int albedo, int normal, int spec, int sss)
