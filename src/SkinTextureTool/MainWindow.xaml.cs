@@ -29,6 +29,7 @@ public partial class MainWindow : Window
     private readonly Morpher _morpher = new();
     private readonly DispatcherTimer _debounce;
     private readonly DispatcherTimer _geometryDebounce;
+    private readonly DispatcherTimer _hairDebounce;
     private bool _generating, _dirty;
     private bool _meshReady;
     private IReadOnlyList<string> _groups = Array.Empty<string>();
@@ -75,6 +76,8 @@ public partial class MainWindow : Window
         _debounce.Tick += (_, _) => { _debounce.Stop(); if (AutoUpdateBox.IsChecked == true) Regenerate(); else MarkStale(true); };
         _geometryDebounce = new DispatcherTimer { Interval = TimeSpan.FromMilliseconds(250) };
         _geometryDebounce.Tick += (_, _) => { _geometryDebounce.Stop(); _ = RebuildMeshAsync(); };
+        _hairDebounce = new DispatcherTimer { Interval = TimeSpan.FromMilliseconds(200) };
+        _hairDebounce.Tick += (_, _) => { _hairDebounce.Stop(); _ = RebuildHairAsync(); };
 
         var state = LoadState();
         Settings.Settings = state.Settings;
@@ -98,6 +101,7 @@ public partial class MainWindow : Window
         LimbSizeBox.SelectedIndex = Math.Clamp(state.LimbSize, 0, LimbSizeBox.Items.Count - 1);
         Settings.Changed += () => _debounce.Start();
         Settings.GeometryChanged += () => _geometryDebounce.Start();
+        Settings.HairChanged += () => { _hairDebounce.Stop(); _hairDebounce.Start(); };
         Sliders.Changed += () => _geometryDebounce.Start();
         Closing += (_, _) => SaveState();
         var saved = state.Nifs.Where(File.Exists).ToList();
@@ -367,6 +371,7 @@ public partial class MainWindow : Window
         _groupShapes = groups.ToDictionary(g => g.Key, g => g.Item2[0].Shape, StringComparer.OrdinalIgnoreCase);
         _meshGroups = groups.Select(g => (g.Key, g.Item2)).ToList();
         _veinKey = null; // the mesh changed, so the vein network is laid out again
+        _hairDebounce.Start();
         if (!names.SequenceEqual(_groups))
         {
             _groups = names;
@@ -528,6 +533,7 @@ public partial class MainWindow : Window
     /// <summary>Painted masks were written: drop the old copies from the GPU so the next generation reads them fresh.</summary>
     private async void OnMasksSaved(IReadOnlyList<string> paths)
     {
+        _hairDebounce.Start(); // the hair mesh may grow from one of these masks
         foreach (var path in paths.Distinct(StringComparer.OrdinalIgnoreCase))
         {
             _imageTextures.Remove(path);
@@ -536,6 +542,70 @@ public partial class MainWindow : Window
         Regions.Settings = Settings.Settings;
         SaveState();
         Regenerate();
+    }
+
+    // ---------- hair mesh ----------
+
+    private readonly Dictionary<string, (DateTime Stamp, float[] Grey, int W, int H)> _hairMasks = new(StringComparer.OrdinalIgnoreCase);
+    private bool _hairBuilding, _hairAgain;
+
+    /// <summary>Grows the hair cards from the hair mesh settings and its masks, and shows them in the preview.</summary>
+    private async Task RebuildHairAsync()
+    {
+        if (_hairBuilding) { _hairAgain = true; return; }
+        _hairBuilding = true;
+        try
+        {
+            do
+            {
+                _hairAgain = false;
+                var s = Settings.Settings;
+                var layer = s.HairMesh;
+                if (!layer.Enabled || _meshGroups.Count == 0)
+                {
+                    await Preview.Run(() => Preview.Renderer.SetHairMesh(null, layer.Color, 0));
+                    HairInfo.Text = "";
+                    Preview.Refresh();
+                    continue;
+                }
+                var surfaces = new List<HairMeshBuilder.Surface>();
+                foreach (var (group, shapes) in _meshGroups)
+                {
+                    var path = layer.MaskFor(group);
+                    if (path == null || !File.Exists(path)) continue;
+                    var stamp = File.GetLastWriteTimeUtc(path);
+                    if (!_hairMasks.TryGetValue(path, out var m) || m.Stamp != stamp)
+                    {
+                        var image = await Task.Run(() => ImageFiles.Load(path));
+                        var grey = new float[image.Width * image.Height];
+                        for (var i = 0; i < grey.Length; i++) grey[i] = image.Rgba[i * 4] / 255f;
+                        _hairMasks[path] = m = (stamp, grey, image.Width, image.Height);
+                    }
+                    surfaces.AddRange(shapes.Select(x => new HairMeshBuilder.Surface(x.Shape, m.Grey, m.W, m.H)));
+                }
+                if (surfaces.Count == 0)
+                {
+                    await Preview.Run(() => Preview.Renderer.SetHairMesh(null, layer.Color, 0));
+                    HairInfo.Text = "Hair mesh: choose a mask for the group(s) it should grow on";
+                    Preview.Refresh();
+                    continue;
+                }
+                var snapshot = s.Clone().HairMesh; var seed = s.Seed;
+                var mesh = await Task.Run(() => HairMeshBuilder.Build(surfaces, snapshot, seed));
+                await Preview.Run(() => Preview.Renderer.SetHairMesh(mesh, snapshot.Color, snapshot.RootDarkening));
+                HairInfo.Text = $"Hair mesh: {mesh.CardCount:N0} cards, {mesh.TriangleCount:N0} triangles, {mesh.VertexCount:N0} vertices"
+                                + (mesh.Dropped > 0 ? $" ({mesh.Dropped:N0} cards over the budget left out)" : "");
+                Preview.Refresh();
+            } while (_hairAgain);
+        }
+        catch (Exception ex)
+        {
+            Status("Hair mesh failed: " + ex.Message);
+        }
+        finally
+        {
+            _hairBuilding = false;
+        }
     }
 
     // ---------- anatomical veins ----------

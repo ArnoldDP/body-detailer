@@ -47,7 +47,9 @@ internal sealed class SkinRenderer
         };
     }
 
-    private GlProgram? _generate, _bake, _bleed, _preview, _composite, _shell, _shellBlend;
+    private GlProgram? _generate, _bake, _bleed, _preview, _composite, _shell, _shellBlend, _hair;
+    private GpuShape? _hairMesh;
+    private Vector3 _hairColor; private float _hairRootDark;
     private readonly List<Group> _groups = new();
     private int _emptyVao;
     private float _footprint = 0.05f;
@@ -77,6 +79,7 @@ internal sealed class SkinRenderer
         _bake = new GlProgram(Shaders.UvVertex, Shaders.BakeNormals);
         _bleed = new GlProgram(Shaders.ScreenVertex, Shaders.Bleed);
         _preview = new GlProgram(Shaders.PreviewVertex, Shaders.PreviewFragment);
+        _hair = new GlProgram(Shaders.HairVertex, Shaders.HairFragment);
         _composite = new GlProgram(Shaders.ScreenVertex, Shaders.Composite);
         _emptyVao = GL.GenVertexArray();
         _fbo = GL.GenFramebuffer();
@@ -133,6 +136,41 @@ internal sealed class SkinRenderer
             Centre = (min + max) / 2;
             Radius = (max - min).Length / 2;
         }
+    }
+
+    /// <summary>Uploads the hair cards to draw in the preview (null removes them).</summary>
+    public void SetHairMesh(HairMesh? mesh, Rgb colour, float rootDarkening)
+    {
+        if (_hairMesh is { } old) { GL.DeleteVertexArray(old.Vao); GL.DeleteBuffers(old.Buffers.Length, old.Buffers); _hairMesh = null; }
+        _hairColor = C(colour); _hairRootDark = rootDarkening;
+        if (mesh == null || mesh.Indices.Length == 0) return;
+        var vao = GL.GenVertexArray();
+        GL.BindVertexArray(vao);
+        var buffers = new int[5];
+        GL.GenBuffers(5, buffers);
+        Attribute(buffers[0], 0, 3, mesh.Positions);
+        Attribute(buffers[1], 1, 2, mesh.Uvs);
+        Attribute(buffers[2], 2, 3, mesh.Normals);
+        Attribute(buffers[3], 3, 3, mesh.Tangents);
+        GL.BindBuffer(BufferTarget.ElementArrayBuffer, buffers[4]);
+        GL.BufferData(BufferTarget.ElementArrayBuffer, mesh.Indices.Length * sizeof(uint), mesh.Indices, BufferUsageHint.StaticDraw);
+        GL.BindVertexArray(0);
+        _hairMesh = new GpuShape(vao, buffers, mesh.Indices.Length);
+    }
+
+    private void DrawHair(Matrix4 mvp, Vector3 eye, Vector3 light)
+    {
+        if (_hairMesh is not { } h || _hair == null) return;
+        _hair.Use();
+        _hair.Set("uMvp", mvp);
+        _hair.Set("uEye", eye);
+        _hair.Set("uLight", light);
+        _hair.Set("uHairColor", _hairColor);
+        _hair.Set("uRootDark", _hairRootDark);
+        _hair.Set("uColumns", HairMeshBuilder.AtlasColumns);
+        GL.BindVertexArray(h.Vao);
+        GL.DrawElements(PrimitiveType.Triangles, h.IndexCount, DrawElementsType.UnsignedInt, 0);
+        GL.BindVertexArray(0);
     }
 
     private static void Attribute(int buffer, int location, int size, float[] data)
@@ -516,6 +554,8 @@ internal sealed class SkinRenderer
             _preview.Set("uHasPaint", paint != 0 ? 1 : 0);
             DrawShapes(g);
         }
+        if (mode == 0) DrawHair(mvp, eye, light);
+        _preview.Use();
         if (!shells || _fur.Count == 0) return;
         foreach (var g in _groups.Where(g => g.Ready && g.HasShell))
         {

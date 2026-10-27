@@ -24,6 +24,8 @@ public sealed class SettingsPanel : StackPanel
     public event Action? Changed;
     /// <summary>Raised when a change needs the mesh's normals rebuilt (the smoothing angle).</summary>
     public event Action? GeometryChanged;
+    /// <summary>Raised when the hair mesh settings change (the hair cards rebuild; the textures don't).</summary>
+    public event Action? HairChanged;
 
     public SkinSettings Settings
     {
@@ -56,8 +58,9 @@ public sealed class SettingsPanel : StackPanel
             var layer = (Layer)prop.GetValue(_settings)!;
             var body = new StackPanel { Margin = new Thickness(4) };
             var enabled = new CheckBox { IsChecked = layer.Enabled, VerticalAlignment = VerticalAlignment.Center, Margin = new Thickness(0, 0, 6, 0) };
-            enabled.Checked += (_, _) => { layer.Enabled = true; Raise(); };
-            enabled.Unchecked += (_, _) => { layer.Enabled = false; Raise(); };
+            var hair = layer is HairMeshLayer;
+            enabled.Checked += (_, _) => { layer.Enabled = true; if (hair) RaiseHair(); else Raise(); };
+            enabled.Unchecked += (_, _) => { layer.Enabled = false; if (hair) RaiseHair(); else Raise(); };
             var header = new StackPanel { Orientation = Orientation.Horizontal };
             header.Children.Add(enabled);
             header.Children.Add(Bold(Spaced(prop.Name)));
@@ -65,9 +68,9 @@ public sealed class SettingsPanel : StackPanel
             foreach (var p in layer.GetType().GetProperties().Where(p => p.Name is not nameof(Layer.Enabled) and not nameof(Layer.MaskPaths)))
                 AddProperty(body, layer, p, prop.Name);
             if (layer.GetType().GetCustomAttribute<MaskableAttribute>() != null)
-                AddPerGroupPickers(body, "Mask", layer.MaskPaths);
+                AddPerGroupPickers(body, "Mask", layer.MaskPaths, hair ? RaiseHair : Raise);
             if (layer is NormalLayer normals)
-                AddPerGroupPickers(body, "Detail map", normals.DetailMaps);
+                AddPerGroupPickers(body, "Detail map", normals.DetailMaps, Raise);
 
             Children.Add(new Expander { Header = header, Content = body, Margin = new Thickness(0, 0, 0, 4) });
         }
@@ -96,7 +99,8 @@ public sealed class SettingsPanel : StackPanel
                 var v = isInt ? Math.Round(e.NewValue) : e.NewValue;
                 p.SetValue(owner, isInt ? (object)(int)v : (float)v);
                 text.Text = Format(v, isInt);
-                if (owner is NormalLayer && p.Name is nameof(NormalLayer.SmoothDegree) or nameof(NormalLayer.SeamBlend) or nameof(NormalLayer.SeamConform) or nameof(NormalLayer.Subdivision)) RaiseGeometry();
+                if (owner is HairMeshLayer) RaiseHair();
+                else if (owner is NormalLayer && p.Name is nameof(NormalLayer.SmoothDegree) or nameof(NormalLayer.SeamBlend) or nameof(NormalLayer.SeamConform) or nameof(NormalLayer.Subdivision)) RaiseGeometry();
                 else Raise();
             };
             panel.Children.Add(Row(label, slider, text));
@@ -119,7 +123,7 @@ public sealed class SettingsPanel : StackPanel
                 var c = Rgb.FromHex(box.Text);
                 p.SetValue(owner, c);
                 swatch.Background = Brush(c);
-                Raise();
+                if (owner is HairMeshLayer) RaiseHair(); else Raise();
             };
             // click the swatch for a colour wheel; it writes the hex box, which applies the colour
             swatch.Cursor = System.Windows.Input.Cursors.Hand;
@@ -133,7 +137,7 @@ public sealed class SettingsPanel : StackPanel
     }
 
     /// <summary>One image picker per loaded texture group, stored in <paramref name="paths"/> by group name.</summary>
-    private void AddPerGroupPickers(Panel panel, string label, Dictionary<string, string> paths)
+    private void AddPerGroupPickers(Panel panel, string label, Dictionary<string, string> paths, Action changed)
     {
         if (_groups.Count == 0)
         {
@@ -143,7 +147,7 @@ public sealed class SettingsPanel : StackPanel
         foreach (var group in _groups)
             AddFilePicker(panel, _groups.Count == 1 ? label : $"{label} ({group})",
                 () => paths.TryGetValue(group, out var v) ? v : null,
-                v => { if (v == null) paths.Remove(group); else paths[group] = v; });
+                v => { if (v == null) paths.Remove(group); else paths[group] = v; }, changed);
     }
 
     private void AddSeed(Panel panel, object owner, PropertyInfo p)
@@ -158,7 +162,7 @@ public sealed class SettingsPanel : StackPanel
         panel.Children.Add(Row("Seed", right, null));
     }
 
-    private void AddFilePicker(Panel panel, string label, Func<string?> get, Action<string?> set)
+    private void AddFilePicker(Panel panel, string label, Func<string?> get, Action<string?> set, Action changed)
     {
         var name = new TextBlock { VerticalAlignment = VerticalAlignment.Center, TextTrimming = TextTrimming.CharacterEllipsis, Foreground = Brushes.Gray };
         void Show() { var v = get(); name.Text = v == null ? "(none)" : Path.GetFileName(v); name.ToolTip = v; }
@@ -168,10 +172,10 @@ public sealed class SettingsPanel : StackPanel
         {
             var dlg = new OpenFileDialog { Filter = ImageFiles.Filter, Title = label };
             if (dlg.ShowDialog() != true) return;
-            set(dlg.FileName); Show(); Raise();
+            set(dlg.FileName); Show(); changed();
         };
         var clear = new Button { Content = "✕", Width = 26, Margin = new Thickness(4, 0, 0, 0) };
-        clear.Click += (_, _) => { set(null); Show(); Raise(); };
+        clear.Click += (_, _) => { set(null); Show(); changed(); };
         var right = new DockPanel();
         DockPanel.SetDock(clear, Dock.Right);
         DockPanel.SetDock(browse, Dock.Right);
@@ -202,5 +206,6 @@ public sealed class SettingsPanel : StackPanel
     private static SolidColorBrush Brush(Rgb c) => new(Color.FromRgb((byte)(c.R * 255), (byte)(c.G * 255), (byte)(c.B * 255)));
 
     private void Raise() { if (!_building) Changed?.Invoke(); }
+    private void RaiseHair() { if (!_building) HairChanged?.Invoke(); }
     private void RaiseGeometry() { if (!_building) GeometryChanged?.Invoke(); }
 }

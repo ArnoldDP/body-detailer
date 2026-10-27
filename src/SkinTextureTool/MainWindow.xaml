@@ -123,6 +123,7 @@
             <DockPanel Grid.Column="1" Margin="0,8">
                 <StackPanel DockPanel.Dock="Top" Orientation="Horizontal" Margin="0,0,0,6">
                     <TextBlock Text="Show:" VerticalAlignment="Center" Margin="0,0,6,0"/>
+                    <TextBlock x:Name="HairInfo" VerticalAlignment="Center" Margin="0,0,12,0" Foreground="Gray"/>
                     <ComboBox x:Name="ModeBox" Width="190" SelectedIndex="0" SelectionChanged="OnModeChanged">
                         <ComboBoxItem Content="Lit"/>
                         <ComboBoxItem Content="Colour (diffuse)"/>

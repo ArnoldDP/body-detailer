@@ -152,6 +152,41 @@ public sealed class BodyHairLayer : Layer
 }
 
 /// <summary>
+/// Real hair geometry grown on the body: hair cards (ribbons a few hairs wide) scattered where the mask allows,
+/// combed down the body, curling and clumping. Changing it rebuilds the cards only, not the textures. Needs a mask
+/// on each texture group it should grow on.
+/// </summary>
+[Maskable]
+public sealed class HairMeshLayer : Layer
+{
+    public HairMeshLayer() => Enabled = false;
+    public Rgb Color { get; set; } = Rgb.FromHex("#2E221A");
+    /// <summary>Cards per square body unit (about 2 cm²) where the mask is white.</summary>
+    [Range(0.5f, 40)] public float Density { get; set; } = 6f;
+    /// <summary>Strand length in body units (about 1.4 cm each).</summary>
+    [Range(0.3f, 8)] public float Length { get; set; } = 2.5f;
+    [Range(0, 1)] public float LengthVariation { get; set; } = 0.4f;
+    /// <summary>Card width in body units: wider cards carry more hairs each, so fewer are needed.</summary>
+    [Range(0.05f, 1.5f)] public float Width { get; set; } = 0.3f;
+    /// <summary>Segments along each card: more bend smoothly but cost two triangles each.</summary>
+    [Range(1, 12)] public int Segments { get; set; } = 4;
+    /// <summary>How far strands stand off the skin at the root: 0 flat, 1 straight out.</summary>
+    [Range(0, 1)] public float Lift { get; set; } = 0.3f;
+    /// <summary>How much strands lie back down toward the skin along their length.</summary>
+    [Range(0, 1)] public float LieFlat { get; set; } = 0.6f;
+    [Range(0, 1)] public float Curl { get; set; } = 0.5f;
+    [Range(0, 1)] public float Clumping { get; set; } = 0.4f;
+    /// <summary>Direction: down the body, leaning in towards the centre line (negative) or out (positive).</summary>
+    [Range(-1, 1)] public float LeanInOut { get; set; } = 0f;
+    /// <summary>Slow swirls in the flow, so it doesn't all run one way.</summary>
+    [Range(0, 1)] public float Swirl { get; set; } = 0.3f;
+    /// <summary>Darker toward the roots.</summary>
+    [Range(0, 1)] public float RootDarkening { get; set; } = 0.5f;
+    /// <summary>The most triangles the hair may use; cards are left out at random beyond it.</summary>
+    [Range(1000, 200000)] public int MaxTriangles { get; set; } = 30000;
+}
+
+/// <summary>
 /// Procedural fur: colour, patterns and strands in the regular textures, plus an optional shell texture
 /// (name_shell.dds next to the diffuse, with name_shell.json) for Bottled Shaders' fur shells. A mask per texture
 /// sets where fur grows (white = fur).
@@ -295,6 +330,7 @@ public sealed class SkinSettings
     public AnatomicalVeinsLayer AnatomicalVeins { get; set; } = new();
     public FurLayer Fur { get; set; } = new();
     public BodyHairLayer BodyHair { get; set; } = new();
+    public HairMeshLayer HairMesh { get; set; } = new();
     public MaterialLayer Material { get; set; } = new();
     public NormalLayer Normals { get; set; } = new();
 
