@@ -57,6 +57,13 @@
                         <ComboBoxItem Content="2048"/>
                         <ComboBoxItem Content="4096"/>
                     </ComboBox>
+                    <DockPanel Margin="0,6,0,0">
+                        <Button x:Name="RegenerateButton" DockPanel.Dock="Right" Content="Regenerate" Padding="10,2" Click="OnRegenerate"
+                                ToolTip="Render the preview with the current settings"/>
+                        <CheckBox x:Name="AutoUpdateBox" Content="Auto-update" IsChecked="True" VerticalAlignment="Center"
+                                  Checked="OnAutoUpdateChanged" Unchecked="OnAutoUpdateChanged"
+                                  ToolTip="Off: changes wait for Regenerate (export always uses the current settings)"/>
+                    </DockPanel>
 
                     <TextBlock Text="Export" FontWeight="SemiBold" Margin="0,14,0,2"/>
                     <TextBlock Text="Size"/>

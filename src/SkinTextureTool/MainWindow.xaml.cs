@@ -61,13 +61,14 @@ public partial class MainWindow : Window
         public double LimbBand { get; set; } = 3;
         public bool SkipBeasts { get; set; } = true;
         public bool ZipOutput { get; set; }
+        public bool AutoUpdate { get; set; } = true;
     }
 
     public MainWindow()
     {
         InitializeComponent();
         _debounce = new DispatcherTimer { Interval = TimeSpan.FromMilliseconds(120) };
-        _debounce.Tick += (_, _) => { _debounce.Stop(); Regenerate(); };
+        _debounce.Tick += (_, _) => { _debounce.Stop(); if (AutoUpdateBox.IsChecked == true) Regenerate(); else MarkStale(true); };
         _geometryDebounce = new DispatcherTimer { Interval = TimeSpan.FromMilliseconds(250) };
         _geometryDebounce.Tick += (_, _) => { _geometryDebounce.Stop(); _ = RebuildMeshAsync(); };
 
@@ -87,6 +88,7 @@ public partial class MainWindow : Window
         if (string.IsNullOrEmpty(Patcher.Mo2Folder) && state.Mo2Folder != null) Patcher.Mo2Folder = state.Mo2Folder;
         Patcher.Bands = (state.NeckBand, state.LimbBand);
         Patcher.Options = (state.SkipBeasts, state.ZipOutput);
+        AutoUpdateBox.IsChecked = state.AutoUpdate;
         Settings.Changed += () => _debounce.Start();
         Settings.GeometryChanged += () => _geometryDebounce.Start();
         Sliders.Changed += () => _geometryDebounce.Start();
@@ -418,9 +420,24 @@ public partial class MainWindow : Window
         }
     }
 
+    /// <summary>Shows (or clears) that the preview is behind the settings while auto-update is off.</summary>
+    private void MarkStale(bool stale)
+    {
+        RegenerateButton.FontWeight = stale ? FontWeights.Bold : FontWeights.Normal;
+        RegenerateButton.Content = stale ? "Regenerate •" : "Regenerate";
+    }
+
+    private void OnRegenerate(object sender, RoutedEventArgs e) => Regenerate();
+
+    private void OnAutoUpdateChanged(object sender, RoutedEventArgs e)
+    {
+        if (IsLoaded && AutoUpdateBox.IsChecked == true && RegenerateButton.FontWeight == FontWeights.Bold) Regenerate();
+    }
+
     private async void Regenerate()
     {
         if (!_meshReady) return;
+        MarkStale(false);
         if (_generating) { _dirty = true; return; }
         _generating = true;
         try
@@ -773,6 +790,7 @@ public partial class MainWindow : Window
                 LimbBand = Patcher.Bands.Limb,
                 SkipBeasts = Patcher.Options.SkipBeasts,
                 ZipOutput = Patcher.Options.Zip,
+                AutoUpdate = AutoUpdateBox.IsChecked == true,
             };
             File.WriteAllText(StateFile, JsonSerializer.Serialize(state, new JsonSerializerOptions { WriteIndented = true }));
         }

@@ -277,56 +277,56 @@ internal static class Shaders
                 float k = uFootprint / max(abs(dFdx(vUv.x)), 1e-7); // body units per UV unit (one scale for the mesh)
                 vec2 fdir = length(fuv) > 1e-9 ? normalize(fuv) : vec2(0.0, -1.0);
                 vec2 uv2 = vUv * k;
-                // real hairs are far thinner than a texel, so they're drawn about a texel wide (fainter the wider they
-                // had to be made) with roots spaced so neighbouring strands stay apart at this resolution
-                float width = max(0.025, 0.8 * uFootprint);
-                float thin = mix(1.0, 0.03 / width, 0.35);
-                float spacing = max(0.28 / uHair.z, 2.5 * width);
-                float len = 0.4 * uHair.w;                      // strand length (body units; ~3.5 mm per step)
-                spacing = max(spacing, len / 5.0);               // long strands: fewer roots, so a texel checks at most 11x11
+                // fine strands like hand-drawn hair: thin (fading out rather than widening when a texel is coarser than a
+                // hair), long, half transparent, and every strand that reaches a texel adds to it, so density builds up
+                // from overlap. Long strands with sparse roots stay cheap: a texel checks at most 11x11 roots per layer.
+                float width = max(0.014, 0.6 * uFootprint);
+                float thin = sqrt(min(1.0, 0.014 / width));
+                float len = 0.6 * uHair.w;                      // strand length (body units; ~0.9 cm per step)
+                float spacing = max(0.45 / uHair.z, len / 5.0);
                 int reach = min(int(ceil(len / spacing)), 5);
                 // skin: a light stubble tint under the hair
                 col = mix(col, col * mix(vec3(1.0), uHairColor * 2.2, 0.6), uHair.y * 0.25 * (1.0 - uHair2.z * 0.6));
-                // three offset layers drawn deepest first: deeper strands are darker and partly covered by the ones above
-                float topHair = 0.0;
-                for (int L = 0; L < 3; L++) {
-                vec2 luv = uv2 + vec2(0.37, 0.61) * spacing * float(L);
-                vec2 cell = floor(luv / spacing);
-                float best = 0.0, bestHeight = 0.0, bestT = 0.0;
-                for (int dy = -5; dy <= 5; dy++)
-                for (int dx = -5; dx <= 5; dx++) {
-                    if (abs(dx) > reach || abs(dy) > reach) continue;
-                    vec2 c = cell + vec2(float(dx), float(dy));
-                    vec3 h = randVec(ivec3(c, 227 + 10 * L));
-                    if (h.z < uHair2.z) continue;                // sparseness: this root grows no hair
-                    vec2 root = (c + h.xy) * spacing;
-                    vec3 h2 = randVec(ivec3(c, 229 + 10 * L));
-                    float ang = (h2.x - 0.5) * (0.35 + 0.9 * uHair2.x);
-                    vec2 d = vec2(fdir.x * cos(ang) - fdir.y * sin(ang), fdir.x * sin(ang) + fdir.y * cos(ang));
-                    vec2 perp = vec2(-d.y, d.x);
-                    float l = len * (0.55 + 0.45 * h2.y);
-                    vec2 rel = luv - root;
-                    float t = dot(rel, d) / l;
-                    if (t < 0.0 || t > 1.0) continue;
-                    // bend (a steady curve) and wave (curl) across the strand
-                    float bend = (h2.z - 0.5) * 0.5 * l * (0.3 + uHair2.x);
-                    float wave = sin(t * (6.0 + 10.0 * h.z) + h2.x * 6.28) * 0.12 * l * uHair2.x;
-                    float off = dot(rel, perp) - (bend * t * t + wave * t);
-                    float w = width * mix(1.0, 0.25, t);         // tapering to a fine tip
-                    float line = (1.0 - smoothstep(w * 0.5, w, abs(off))) * thin;
-                    if (line > best) { best = line; bestHeight = mix(0.6, 1.0, h.z) * (1.0 - t * 0.35); bestT = t; }
+                // four offset layers, deepest first: deeper strands are darker and covered by those above
+                float cover = 0.0, topH = 0.0; vec3 topC = uHairColor;
+                for (int L = 0; L < 4; L++) {
+                    vec2 luv = uv2 + vec2(0.37, 0.61) * spacing * float(L);
+                    vec2 cell = floor(luv / spacing);
+                    for (int dy = -5; dy <= 5; dy++)
+                    for (int dx = -5; dx <= 5; dx++) {
+                        if (abs(dx) > reach || abs(dy) > reach) continue;
+                        vec2 c = cell + vec2(float(dx), float(dy));
+                        vec3 h = randVec(ivec3(c, 227 + 10 * L));
+                        if (h.z < uHair2.z) continue;            // sparseness: this root grows no hair
+                        vec2 root = (c + h.xy) * spacing;
+                        vec3 h2 = randVec(ivec3(c, 229 + 10 * L));
+                        float ang = (h2.x - 0.5) * (0.3 + 0.8 * uHair2.x);
+                        vec2 d = vec2(fdir.x * cos(ang) - fdir.y * sin(ang), fdir.x * sin(ang) + fdir.y * cos(ang));
+                        vec2 perp = vec2(-d.y, d.x);
+                        float l = len * (0.45 + 0.55 * h2.y);
+                        vec2 rel = luv - root;
+                        float t = dot(rel, d) / l;
+                        if (t < 0.0 || t > 1.0) continue;
+                        // a steady curve plus, with curl, a wave along it
+                        float bend = (h2.z - 0.5) * l * (0.25 + 0.6 * uHair2.x);
+                        float wave = sin(t * (5.0 + 9.0 * h.z) + h2.x * 6.28) * 0.08 * l * uHair2.x;
+                        float off = dot(rel, perp) - (bend * t * t + wave * t);
+                        float w = width * mix(1.0, 0.35, t);     // tapering to a fine tip
+                        float a = (1.0 - smoothstep(w * 0.35, w, abs(off))) * thin
+                                * mix(0.45, 0.85, h.y) * smoothstep(1.0, 0.8, t) * smoothstep(0.0, 0.04, t);
+                        if (a <= 0.0) continue;
+                        float shade = (0.7 + 0.1 * float(L)) * mix(0.85, 1.05, t) * mix(0.85, 1.1, h2.y);
+                        vec3 hc = min(uHairColor * shade, col * (0.5 + 0.08 * float(L))); // always darker than the skin
+                        a *= 0.55 + 0.45 * uHair.y;
+                        col = mix(col, hc, a);
+                        cover = 1.0 - (1.0 - cover) * (1.0 - a);
+                        float sh = a * mix(0.6, 1.0, h.z) * (1.0 - t * 0.35) * (0.7 + 0.1 * float(L));
+                        if (sh > topH) { topH = sh; topC = hc; }
+                    }
                 }
-                // darker toward the root and in deeper layers, lighter at the tips catching light
-                float shade = (0.75 + 0.12 * float(L)) * mix(0.85, 1.05, bestT);
-                vec3 hc = uHairColor * shade * (0.9 + 0.2 * bestHeight);
-                // hair always reads darker than the skin under it, whatever the skin tone
-                hc = min(hc, col * (0.55 + 0.1 * float(L)));
-                col = mix(col, hc, clamp(best, 0.0, 1.0) * (0.55 + 0.45 * uHair.y));
-                topHair = max(topHair, best);
-                float hairShell = best * bestHeight * (0.75 + 0.125 * float(L));
-                if (hairShell > shell.a) shell = vec4(clamp(hc, 0.0, 1.0), hairShell);
-                }
-                height += topHair * 0.0015;
+                height += cover * 0.0015;
+                float hairShell = clamp(max(topH, cover * 0.8), 0.0, 1.0);
+                if (hairShell > shell.a) shell = vec4(clamp(topC, 0.0, 1.0), hairShell);
             }
 
             float spec = uMaterial.x * (1.0 - uMaterial.y * (0.5 + 0.5 * fbm(p * 0.2 + 131.0, 3)));
