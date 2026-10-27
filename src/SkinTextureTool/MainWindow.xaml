@@ -52,10 +52,13 @@
                     </ItemsControl>
 
                     <TextBlock Text="Preview size" FontWeight="SemiBold" Margin="0,14,0,2"/>
-                    <ComboBox x:Name="PreviewSizeBox" SelectedIndex="1" SelectionChanged="OnPreviewSizeChanged">
+                    <ComboBox x:Name="PreviewSizeBox" SelectedIndex="1" SelectionChanged="OnPreviewSizeChanged"
+                              ToolTip="8192 and 16384 need a lot of video memory (16384 several GB per texture group)">
                         <ComboBoxItem Content="1024"/>
                         <ComboBoxItem Content="2048"/>
                         <ComboBoxItem Content="4096"/>
+                        <ComboBoxItem Content="8192"/>
+                        <ComboBoxItem Content="16384"/>
                     </ComboBox>
                     <DockPanel Margin="0,6,0,0">
                         <Button x:Name="RegenerateButton" DockPanel.Dock="Right" Content="Regenerate" Padding="10,2" Click="OnRegenerate"

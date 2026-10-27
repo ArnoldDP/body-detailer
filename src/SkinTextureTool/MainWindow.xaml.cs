@@ -501,6 +501,8 @@ public partial class MainWindow : Window
                 await EnsureExistingTexturesAsync(snapshot);
                 await EnsureVeinNetworkAsync(snapshot);
                 var size = PreviewSize;
+                var max = await Preview.Run(() => OpenTK.Graphics.OpenGL4.GL.GetInteger(OpenTK.Graphics.OpenGL4.GetPName.MaxTextureSize));
+                if (size > max) { Status($"This graphics card's largest texture is {max}×{max}; previewing at that."); size = max; }
                 var images = new Dictionary<string, int>(_imageTextures, StringComparer.OrdinalIgnoreCase);
                 await Preview.Run(() => Preview.Renderer.Generate(snapshot, size, images));
             } while (_dirty);

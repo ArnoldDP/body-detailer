@@ -457,7 +457,7 @@ internal sealed class SkinRenderer
         var h = s.BodyHair;
         p.Set("uHairColor", C(h.Color));
         p.Set("uHair", new Vector4(h.Enabled ? 1 : 0, h.SkinDarkening, h.Density, h.StrandLength));
-        p.Set("uHair2", new Vector4(h.Curl, h.LeanInOut, h.Sparseness, 0));
+        p.Set("uHair2", new Vector4(h.Curl, h.LeanInOut, h.Sparseness, h.Bump));
         p.Set("uMaterial", new Vector4(s.Material.Specular, s.Material.SpecularVariation, s.Material.Enabled ? s.Material.Subsurface : 0f, 0));
         p.Set("uSssColor", C(s.Material.SubsurfaceColor));
         p.Set("uPbr", new Vector4(s.Material.Roughness, s.Material.RoughnessVariation, s.Material.Enabled ? s.Material.Fuzz : 0f, s.Material.CavityOcclusion));

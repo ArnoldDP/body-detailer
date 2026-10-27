@@ -138,7 +138,9 @@ public sealed class BodyHairLayer : Layer
     public Rgb Color { get; set; } = Rgb.FromHex("#3A2A1F");
     /// <summary>How much the hair darkens the skin underneath in the diffuse (the stubble look).</summary>
     [Range(0, 1)] public float SkinDarkening { get; set; } = 0.35f;
-    [Range(0.3f, 3)] public float Density { get; set; } = 1f;
+    [Range(0.3f, 5)] public float Density { get; set; } = 1f;
+    /// <summary>How much the strands raise the normal map, as ridges running along each hair.</summary>
+    [Range(0, 1)] public float Bump { get; set; } = 0.4f;
     /// <summary>How stretched strands are along their direction.</summary>
     [Range(1, 10)] public float StrandLength { get; set; } = 5f;
     /// <summary>How much strands twist about (curly pubic hair at the top end).</summary>
