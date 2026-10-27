@@ -228,7 +228,8 @@ public partial class MainWindow : Window
             if (picker.ShowDialog() != true || picker.Picked is not { } npc) return;
             _loadedNpc = npc;
             TngAssignBox.IsEnabled = true;
-            TngAssignBox.Content = $"Give it to {npc.Name} ({npc.EditorId})";
+            TngAssignBox.Content = $"Add it to {npc.Name}'s skin ({npc.EditorId}, patch plugin)";
+            TngAssignBox.IsChecked = true;
 
             Status($"Loading {npc.Name}…");
             var session = _session;
@@ -638,15 +639,20 @@ public partial class MainWindow : Window
             var sets = built.Surfaces.Select(s => Sliders.SetFor(s.NifPath)).ToList();
             var name = HairNameBox.Text;
             var result = await Task.Run(() => HairExporter.Export(folder, name, built.Mesh, built.Surfaces, sets, built.Look, built.Atlas, HairAtlasSize));
+            var file = HairExporter.Safe(name);
+            var meshPath = Path.Combine(HairExporter.Folder, file + "_1.nif");
             if (TngAddonBox.IsChecked == true)
             {
-                var file = HairExporter.Safe(name);
-                var npc = TngAssignBox.IsChecked == true && _loadedNpc is { } n
-                    ? TngAddon.Loc(n.Npc.FormKey.ID, n.Npc.FormKey.ModKey.FileName) : null;
-                var plugin = await Task.Run(() => TngAddon.Write(folder, file, name.Trim(), Path.Combine(HairExporter.Folder, file + "_1.nif"), npc));
+                var plugin = await Task.Run(() => TngAddon.Write(folder, file, name.Trim(), meshPath, null));
                 result.Written.AddRange(plugin);
-                result.Notes.Add($"Enable {plugin[0]} in your load order (after TheNewGentleman.esp)"
-                                 + (npc != null ? $"; {_loadedNpc!.Name} gets it through {plugin[^1]}." : "; pick it per NPC in TNG's menu."));
+                result.Notes.Add($"Enable {plugin[0]} after TheNewGentleman.esp and pick it per NPC in TNG's menu.");
+            }
+            if (TngAssignBox.IsChecked == true && _loadedNpc is { } npc && _session is { } session)
+            {
+                var (plugin, notes) = await Task.Run(() => NpcSkinPatch.Write(session, npc.Npc.FormKey, folder, file, meshPath));
+                result.Written.Add(plugin);
+                result.Notes.AddRange(notes);
+                result.Notes.Add($"Enable {plugin} at the end of your load order (it overrides {npc.EditorId}, like a patch).");
             }
             Status($"Wrote {result.Written.Count} hair file(s) to {folder}. " + string.Join(" ", result.Notes));
         }
