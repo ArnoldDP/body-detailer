@@ -192,6 +192,8 @@ public partial class MainWindow : Window
     }
 
     private SkinTextureTool.Core.Patcher.GameSession? _session;
+    /// <summary>The load order being read in the background (the session and a fresh NPC list).</summary>
+    private Task<(SkinTextureTool.Core.Patcher.GameSession Session, List<SkinTextureTool.Core.Patcher.NpcAssets.Entry> Npcs)>? _sessionLoad;
     private string? _sessionFolder;
     private List<SkinTextureTool.Core.Patcher.NpcAssets.Entry>? _npcs;
     /// <summary>The NPC last loaded with Load NPC (the TNG add-on can be assigned to it).</summary>
@@ -214,16 +216,30 @@ public partial class MainWindow : Window
         }
         try
         {
-            if (_session == null || _sessionFolder != mo2Folder)
+            if (_sessionLoad == null || _sessionFolder != mo2Folder)
             {
-                Status("Reading the load order's NPCs…");
+                // the list from last time shows at once; the load order is read meanwhile, and refreshes the list
+                // (and the cache) when it's done
+                var cachePath = Path.Combine(AppContext.BaseDirectory, "NPC list cache.json");
                 var extract = Path.Combine(AppContext.BaseDirectory, "Extracted meshes");
-                _session?.Dispose();
-                _session = await Task.Run(() => new SkinTextureTool.Core.Patcher.GameSession(mo2Folder, extract));
+                _session?.Dispose(); _session = null;
                 _sessionFolder = mo2Folder;
-                _npcs = await Task.Run(() => SkinTextureTool.Core.Patcher.NpcAssets.List(_session));
+                _npcs = await Task.Run(() => SkinTextureTool.Core.Patcher.NpcAssets.LoadCache(cachePath, mo2Folder));
+                _sessionLoad = Task.Run(() =>
+                {
+                    var session = new SkinTextureTool.Core.Patcher.GameSession(mo2Folder, extract);
+                    var list = SkinTextureTool.Core.Patcher.NpcAssets.List(session);
+                    SkinTextureTool.Core.Patcher.NpcAssets.SaveCache(cachePath, mo2Folder, list);
+                    return (session, list);
+                });
+                if (_npcs == null)
+                {
+                    Status("Reading the load order's NPCs…");
+                    (_session, _npcs) = await _sessionLoad;
+                }
             }
-            Status($"{_npcs!.Count} NPCs in the load order.");
+            if (_session == null && _sessionLoad.IsCompletedSuccessfully) (_session, _npcs) = _sessionLoad.Result;
+            Status($"{_npcs!.Count} NPCs in the load order" + (_session == null ? " (from last time; the load order is still being read)." : "."));
             var picker = new NpcPickerWindow(_npcs) { Owner = this };
             if (picker.ShowDialog() != true || picker.Picked is not { } npc) return;
             _loadedNpc = npc;
@@ -231,6 +247,11 @@ public partial class MainWindow : Window
             TngAssignBox.Content = $"Add it to {npc.Name}'s skin ({npc.EditorId}, patch plugin)";
             TngAssignBox.IsChecked = true;
 
+            if (_session == null)
+            {
+                Status($"Reading the load order before loading {npc.Name}…");
+                (_session, _npcs) = await _sessionLoad;
+            }
             Status($"Loading {npc.Name}…");
             var session = _session;
             var (loaded, notes) = await Task.Run(() =>
@@ -271,6 +292,7 @@ public partial class MainWindow : Window
         }
         catch (Exception ex)
         {
+            if (_sessionLoad is { IsFaulted: true }) _sessionLoad = null; // read the load order again next time
             Status("Couldn't load that NPC: " + ex.Message);
         }
     }
@@ -649,7 +671,7 @@ public partial class MainWindow : Window
             }
             if (TngAssignBox.IsChecked == true && _loadedNpc is { } npc && _session is { } session)
             {
-                var (plugin, notes) = await Task.Run(() => NpcSkinPatch.Write(session, npc.Npc.FormKey, folder, file, meshPath));
+                var (plugin, notes) = await Task.Run(() => NpcSkinPatch.Write(session, Mutagen.Bethesda.Plugins.FormKey.Factory(npc.FormKey), folder, file, meshPath));
                 result.Written.Add(plugin);
                 result.Notes.AddRange(notes);
                 result.Notes.Add($"Enable {plugin} at the end of your load order (it overrides {npc.EditorId}, like a patch).");

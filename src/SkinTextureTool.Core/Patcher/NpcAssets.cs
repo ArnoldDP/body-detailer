@@ -44,7 +44,8 @@ public sealed class GameSession : IDisposable
 /// </summary>
 public static class NpcAssets
 {
-    public sealed record Entry(string Name, string EditorId, string FormKey, string Plugin, string Race, bool Female, INpcGetter Npc)
+    /// <remarks><see cref="Npc"/> is null for entries from the list cache; it's resolved from the session when needed.</remarks>
+    public sealed record Entry(string Name, string EditorId, string FormKey, string Plugin, string Race, bool Female, INpcGetter? Npc)
     {
         public override string ToString() => $"{Name}  ({EditorId}, {Race}, {Plugin})";
     }
@@ -67,11 +68,31 @@ public static class NpcAssets
         return list.OrderBy(e => e.Name, StringComparer.OrdinalIgnoreCase).ToList();
     }
 
+    private sealed record CachedList(string Mo2Folder, List<Entry> Npcs);
+
+    /// <summary>The NPC list saved by <see cref="SaveCache"/> for this MO2 folder, or null. It may be out of date;
+    /// the caller refreshes it once the load order has been read.</summary>
+    public static List<Entry>? LoadCache(string path, string mo2Folder)
+    {
+        try
+        {
+            var cached = System.Text.Json.JsonSerializer.Deserialize<CachedList>(File.ReadAllText(path));
+            return cached != null && string.Equals(cached.Mo2Folder, mo2Folder, StringComparison.OrdinalIgnoreCase) ? cached.Npcs : null;
+        }
+        catch { return null; }
+    }
+
+    public static void SaveCache(string path, string mo2Folder, IEnumerable<Entry> npcs)
+    {
+        try { File.WriteAllText(path, System.Text.Json.JsonSerializer.Serialize(new CachedList(mo2Folder, npcs.Select(e => e with { Npc = null }).ToList()))); }
+        catch { /* only a cache */ }
+    }
+
     /// <summary>The pieces to load for an NPC; body pieces use the variant nearer the NPC's weight.</summary>
     public static List<Piece> Pieces(GameSession game, Entry entry, out List<string> notes)
     {
         notes = new List<string>();
-        var npc = entry.Npc;
+        var npc = entry.Npc ?? game.Cache.Resolve<INpcGetter>(Mutagen.Bethesda.Plugins.FormKey.Factory(entry.FormKey));
         var pieces = new List<Piece>();
         var faceGen = FaceGenPatcher.FaceGenPath(npc);
         if (game.Data.Exists(faceGen)) pieces.Add(new Piece(faceGen, "FaceGen head", null));

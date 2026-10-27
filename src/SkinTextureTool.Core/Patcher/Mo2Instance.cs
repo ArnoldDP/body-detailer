@@ -48,17 +48,10 @@ public sealed class Mo2Instance
         var enabled = File.ReadLines(Path.Combine(profileDir, "modlist.txt"))
             .Where(l => l.StartsWith('+')).Select(l => l[1..].Trim()).Reverse().ToList();
         EnabledMods = enabled.Count;
-        var files = new Dictionary<string, string>(StringComparer.OrdinalIgnoreCase);
-        void Add(string folder)
-        {
-            if (!Directory.Exists(folder)) return;
-            foreach (var file in Directory.EnumerateFiles(folder, "*", SearchOption.AllDirectories))
-            {
-                var rel = Path.GetRelativePath(folder, file);
-                if (rel.StartsWith("fomod", StringComparison.OrdinalIgnoreCase) || rel.EndsWith("meta.ini", StringComparison.OrdinalIgnoreCase)) continue;
-                files[rel] = file;
-            }
-        }
+        // every folder's files, lowest priority first: walked in parallel (the slow part), then merged in order so
+        // higher priority folders win exactly as before
+        var folders = new List<string>();
+        void Add(string folder) => folders.Add(folder);
         Add(GameData);
         // the patcher's own output must never become its input
         var excluded = (exclude ?? Array.Empty<string>()).Select(e => Path.GetFullPath(e).TrimEnd(Path.DirectorySeparatorChar)).ToHashSet(StringComparer.OrdinalIgnoreCase);
@@ -71,6 +64,22 @@ public sealed class Mo2Instance
         }
         SkippedOutputMods = skipped;
         Add(overwrite);
+        var lists = new List<(string Rel, string File)>[folders.Count];
+        Parallel.For(0, folders.Count, i =>
+        {
+            var folder = folders[i];
+            var list = lists[i] = new List<(string, string)>();
+            if (!Directory.Exists(folder)) return;
+            foreach (var file in Directory.EnumerateFiles(folder, "*", SearchOption.AllDirectories))
+            {
+                var rel = Path.GetRelativePath(folder, file);
+                if (rel.StartsWith("fomod", StringComparison.OrdinalIgnoreCase) || rel.EndsWith("meta.ini", StringComparison.OrdinalIgnoreCase)) continue;
+                list.Add((rel, file));
+            }
+        });
+        var files = new Dictionary<string, string>(StringComparer.OrdinalIgnoreCase);
+        foreach (var list in lists)
+            foreach (var (rel, file) in list) files[rel] = file;
         Files = files;
 
         // plugins: loadorder.txt holds the order; plugins.txt marks the enabled ones with '*'. Plugins it doesn't

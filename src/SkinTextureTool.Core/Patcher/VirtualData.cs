@@ -24,19 +24,20 @@ public sealed class VirtualData : IDisposable
         _mo2 = mo2;
         _keepExtracted = extractFolder != null;
         _extractFolder = extractFolder ?? Path.Combine(Path.GetTempPath(), "SkinTextureTool-extract-" + Environment.ProcessId);
-        var archives = new List<string>();
-        foreach (var name in mo2.ArchivesInOrder())
+        // archive indexes read in parallel, then merged in order (later archives win)
+        var names = mo2.ArchivesInOrder().ToList();
+        var read = new (List<IArchiveFile>? Files, string? Error)[names.Count];
+        Parallel.For(0, names.Count, i =>
         {
-            try
-            {
-                var reader = Archive.CreateReader(GameRelease.SkyrimSE, mo2.Files[name]);
-                foreach (var file in reader.Files) _archived[Normalize(file.Path)] = file; // later archives win
-                archives.Add(name);
-            }
-            catch (Exception ex)
-            {
-                Problems.Add($"Couldn't read archive {name}: {ex.Message}");
-            }
+            try { read[i] = (Archive.CreateReader(GameRelease.SkyrimSE, mo2.Files[names[i]]).Files.ToList(), null); }
+            catch (Exception ex) { read[i] = (null, ex.Message); }
+        });
+        var archives = new List<string>();
+        for (var i = 0; i < names.Count; i++)
+        {
+            if (read[i].Files is not { } files) { Problems.Add($"Couldn't read archive {names[i]}: {read[i].Error}"); continue; }
+            foreach (var file in files) _archived[Normalize(file.Path)] = file;
+            archives.Add(names[i]);
         }
         Archives = archives;
     }
