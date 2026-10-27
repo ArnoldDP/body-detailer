@@ -97,20 +97,9 @@ public static class HairExporter
             tris.Add(new Triangle((ushort)mesh.Indices[i], (ushort)mesh.Indices[i + 1], (ushort)mesh.Indices[i + 2]));
 
         var hair = nif.CreateShapeFromData(shapeName, verts, tris, uvs, norms);
-        nif.CreateSkinning(hair);
-        var boneIds = new vectorint();
-        foreach (var id in union) boneIds.Add(id);
-        nif.SetShapeBoneIDList(hair, boneIds);
-        nif.SetShapeTransformGlobalToSkin(hair, toSkin);
-        for (var b = 0; b < union.Count; b++)
-        {
-            var (si, li) = Enumerable.Range(0, bodies.Count).Select(s => (s, Array.IndexOf(local[s], b))).First(x => x.Item2 >= 0);
-            var t = new MatTransform();
-            nif.GetShapeTransformSkinToBone(bodies[si], (uint)li, t);
-            nif.SetShapeTransformSkinToBone(hair, (uint)b, t);
-        }
-
-        // weights: the root triangle's three vertices' weights, blended by the root's barycentric weights
+        // weights: the root triangle's three vertices' weights, blended by the root's barycentric weights (by union
+        // bone index), up to four per vertex
+        var vertexWeights = new List<(int Bone, float Weight)>[mesh.VertexCount];
         for (var v = 0; v < mesh.VertexCount; v++)
         {
             var si = mesh.RootSurface[v];
@@ -124,10 +113,30 @@ public static class HairExporter
                     blend[u] = blend.GetValueOrDefault(u) + bw * w;
                 }
             }
-            var top = blend.OrderByDescending(kv => kv.Value).Take(4).ToList();
+            var top = blend.Where(kv => kv.Value > 1e-4f).OrderByDescending(kv => kv.Value).Take(4).ToList();
             var sum = top.Sum(kv => kv.Value);
+            vertexWeights[v] = top.Select(kv => (kv.Key, sum > 0 ? kv.Value / sum : 0)).ToList();
+        }
+
+        // skinned to only the bones it uses (as hand-made add-ons are), numbered 0..n-1
+        var used = vertexWeights.SelectMany(w => w.Select(x => x.Bone)).Distinct().OrderBy(b => b).ToList();
+        var compact = used.Select((u, i) => (u, i)).ToDictionary(x => x.u, x => x.i);
+        nif.CreateSkinning(hair);
+        var boneIds = new vectorint();
+        foreach (var u in used) boneIds.Add(union[u]);
+        nif.SetShapeBoneIDList(hair, boneIds);
+        nif.SetShapeTransformGlobalToSkin(hair, toSkin);
+        for (var b = 0; b < used.Count; b++)
+        {
+            var (si, li) = Enumerable.Range(0, bodies.Count).Select(s => (s, Array.IndexOf(local[s], used[b]))).First(x => x.Item2 >= 0);
+            var t = new MatTransform();
+            nif.GetShapeTransformSkinToBone(bodies[si], (uint)li, t);
+            nif.SetShapeTransformSkinToBone(hair, (uint)b, t);
+        }
+        for (var v = 0; v < mesh.VertexCount; v++)
+        {
             var bones = new vectoruchar(); var ws = new vectorfloat();
-            foreach (var (bone, w) in top) { bones.Add((byte)bone); ws.Add(sum > 0 ? w / sum : 0); }
+            foreach (var (bone, w) in vertexWeights[v]) { bones.Add((byte)compact[bone]); ws.Add(w); }
             nif.SetShapeVertWeights(shapeName, (ushort)v, bones, ws);
         }
 
@@ -151,8 +160,42 @@ public static class HairExporter
         GC.SuppressFinalize(alpha); // the NIF owns it now; the wrapper mustn't free it too
 
         foreach (var body in nif.GetShapes().Where(s => s.name.get() != shapeName).ToList()) nif.DeleteShape(body);
+        FillPartitionBones(nif, used.Count);
         Directory.CreateDirectory(Path.GetDirectoryName(Path.GetFullPath(target))!);
         if (nif.Save(target) != 0) throw new IOException($"Couldn't write {target}.");
+    }
+
+    /// <summary>
+    /// Lists the shape's bones (0..n-1) in its skin partitions. nifly builds the partitions from per-bone weight
+    /// lists, which its C# wrapper can't fill, so with weights set per vertex they come out with no bones and the
+    /// game skins every vertex to the wrong bone. With every bone in the one partition, the vertices' bone indices
+    /// read the same as in the skin, as in hand-made add-ons.
+    /// </summary>
+    private static void FillPartitionBones(NifFile nif, int boneCount)
+    {
+        var header = nif.GetHeader();
+        for (uint i = 0; i < header.GetNumBlocks(); i++)
+        {
+            if (header.GetBlockTypeStringById(i) != "NiSkinPartition") continue;
+            var block = header.GetBlockById(i);
+            var cPtr = (System.Runtime.InteropServices.HandleRef)typeof(NiObject)
+                .GetMethod("getCPtr", System.Reflection.BindingFlags.NonPublic | System.Reflection.BindingFlags.Public | System.Reflection.BindingFlags.Static)!
+                .Invoke(null, new object[] { block })!;
+            var partition = (NiSkinPartition)typeof(NiSkinPartition)
+                .GetConstructor(System.Reflection.BindingFlags.NonPublic | System.Reflection.BindingFlags.Instance, new[] { typeof(IntPtr), typeof(bool) })!
+                .Invoke(new object[] { cPtr.Handle, false });
+            var blocks = partition.partitions;
+            for (var p = 0; p < blocks.Count; p++)
+            {
+                var part = blocks[p];
+                var bones = new vectoruint16();
+                for (var b = 0; b < boneCount; b++) bones.Add((ushort)b);
+                part.bones = bones;
+                part.numBones = (ushort)boneCount;
+                blocks[p] = part;
+            }
+            partition.partitions = blocks;
+        }
     }
 
     /// <summary>Each vertex's (bone index, weight) pairs, from an SE triangle shape's vertex data.</summary>
