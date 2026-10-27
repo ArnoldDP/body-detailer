@@ -194,6 +194,8 @@ public partial class MainWindow : Window
     private SkinTextureTool.Core.Patcher.GameSession? _session;
     private string? _sessionFolder;
     private List<SkinTextureTool.Core.Patcher.NpcAssets.Entry>? _npcs;
+    /// <summary>The NPC last loaded with Load NPC (the TNG add-on can be assigned to it).</summary>
+    private SkinTextureTool.Core.Patcher.NpcAssets.Entry? _loadedNpc;
 
     /// <summary>
     /// Loads one NPC as the game draws it: its FaceGen head, and the body, hands and feet of the skin it wears, with
@@ -224,6 +226,9 @@ public partial class MainWindow : Window
             Status($"{_npcs!.Count} NPCs in the load order.");
             var picker = new NpcPickerWindow(_npcs) { Owner = this };
             if (picker.ShowDialog() != true || picker.Picked is not { } npc) return;
+            _loadedNpc = npc;
+            TngAssignBox.IsEnabled = true;
+            TngAssignBox.Content = $"Give it to {npc.Name} ({npc.EditorId})";
 
             Status($"Loading {npc.Name}…");
             var session = _session;
@@ -633,6 +638,16 @@ public partial class MainWindow : Window
             var sets = built.Surfaces.Select(s => Sliders.SetFor(s.NifPath)).ToList();
             var name = HairNameBox.Text;
             var result = await Task.Run(() => HairExporter.Export(folder, name, built.Mesh, built.Surfaces, sets, built.Look, built.Atlas, HairAtlasSize));
+            if (TngAddonBox.IsChecked == true)
+            {
+                var file = HairExporter.Safe(name);
+                var npc = TngAssignBox.IsChecked == true && _loadedNpc is { } n
+                    ? TngAddon.Loc(n.Npc.FormKey.ID, n.Npc.FormKey.ModKey.FileName) : null;
+                var plugin = await Task.Run(() => TngAddon.Write(folder, file, name.Trim(), Path.Combine(HairExporter.Folder, file + "_1.nif"), npc));
+                result.Written.AddRange(plugin);
+                result.Notes.Add($"Enable {plugin[0]} in your load order (after TheNewGentleman.esp)"
+                                 + (npc != null ? $"; {_loadedNpc!.Name} gets it through {plugin[^1]}." : "; pick it per NPC in TNG's menu."));
+            }
             Status($"Wrote {result.Written.Count} hair file(s) to {folder}. " + string.Join(" ", result.Notes));
         }
         catch (Exception ex)

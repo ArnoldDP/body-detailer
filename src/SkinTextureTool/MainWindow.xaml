@@ -121,6 +121,9 @@
                     <TextBlock Text="Hair mesh" FontWeight="SemiBold" Margin="0,14,0,2"/>
                     <TextBlock Text="Name"/>
                     <TextBox x:Name="HairNameBox" Text="Pubic Hair"/>
+                    <CheckBox x:Name="TngAddonBox" Content="Make a TNG add-on (plugin)" IsChecked="True" Margin="0,4,0,0"/>
+                    <CheckBox x:Name="TngAssignBox" Content="Give it to the loaded NPC" Margin="0,2,0,0" IsEnabled="False"
+                              ToolTip="Writes SKSE\Plugins\TNG\(name)_TNG.ini assigning the add-on to the NPC from Load NPC"/>
                     <Button x:Name="HairExportButton" Content="Export hair mesh" Margin="0,6,0,0" Padding="0,4" Click="OnExportHair"
                             ToolTip="Writes the hair NIF (_0 and _1), its textures and a BodySlide project into the export folder"/>
                 </StackPanel>

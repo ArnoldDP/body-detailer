@@ -17,6 +17,8 @@ public static class HairExporter
 {
     /// <summary>The biped slot TNG and SOS genital add-ons use (SBP_52).</summary>
     public const int Slot = 52;
+    /// <summary>The folder under meshes and textures the hair goes in.</summary>
+    public const string Folder = "Body Detailer Hair";
 
     public sealed record Result(List<string> Written, List<string> Notes);
 
@@ -27,7 +29,7 @@ public static class HairExporter
     {
         var written = new List<string>(); var notes = new List<string>();
         var file = Safe(name);
-        const string folder = "Body Detailer Hair";
+        const string folder = Folder;
         var diffuseRel = Path.Combine("textures", folder, file + ".dds");
         var normalRel = Path.Combine("textures", folder, file + "_n.dds");
         if (mesh.VertexCount > ushort.MaxValue) throw new InvalidOperationException($"The hair has {mesh.VertexCount:N0} vertices; a game shape holds at most 65,535. Lower the density or the triangle budget.");
@@ -327,7 +329,7 @@ public static class HairExporter
         foreach (var b in blocks) w.Write(b);
     }
 
-    private static string Safe(string name)
+    public static string Safe(string name)
     {
         var s = new string(name.Trim().Select(c => char.IsLetterOrDigit(c) ? c : '_').ToArray()).Trim('_');
         return s.Length == 0 ? "Hair" : s;
