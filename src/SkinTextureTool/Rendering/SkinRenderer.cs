@@ -164,8 +164,11 @@ internal sealed class SkinRenderer
     {
         if (_hairAtlas == 0) _hairAtlas = GL.GenTexture();
         GL.BindTexture(TextureTarget.Texture2D, _hairAtlas);
-        GL.TexImage2D(TextureTarget.Texture2D, 0, PixelInternalFormat.Rgba8, size, size, 0, PixelFormat.Rgba, PixelType.UnsignedByte, rgba);
-        GL.GenerateMipmap(GenerateMipmapTarget.Texture2D);
+        // coverage-preserving mips, so hairs don't vanish with distance
+        var mips = HairAtlas.Mips(rgba, size);
+        for (var level = 0; level < mips.Count; level++)
+            GL.TexImage2D(TextureTarget.Texture2D, level, PixelInternalFormat.Rgba8, Math.Max(1, size >> level), Math.Max(1, size >> level), 0, PixelFormat.Rgba, PixelType.UnsignedByte, mips[level]);
+        GL.TexParameter(TextureTarget.Texture2D, TextureParameterName.TextureMaxLevel, mips.Count - 1);
         GL.TexParameter(TextureTarget.Texture2D, TextureParameterName.TextureMinFilter, (int)TextureMinFilter.LinearMipmapLinear);
         GL.TexParameter(TextureTarget.Texture2D, TextureParameterName.TextureMagFilter, (int)TextureMagFilter.Linear);
         GL.TexParameter(TextureTarget.Texture2D, TextureParameterName.TextureWrapS, (int)TextureWrapMode.ClampToEdge);

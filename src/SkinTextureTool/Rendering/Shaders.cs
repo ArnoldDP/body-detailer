@@ -512,7 +512,7 @@ internal static class Shaders
         uniform sampler2D uAtlas;
         void main() {
             vec4 tex = texture(uAtlas, vUv);
-            if (tex.a < 0.35) discard; // alpha tested, as the game draws hair
+            if (tex.a < 0.35) discard; // alpha tested, as the game draws hair (HairAtlas.Cutoff)
             float v = tex.g;
             vec3 n = normalize(vNrm), t = normalize(vTan);
             vec3 l = uLight, e = normalize(uEye - vPos), hv = normalize(l + e);

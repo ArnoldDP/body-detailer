@@ -15,7 +15,7 @@ public static class HairAtlas
         var coverage = new float[size * size];
         var rng = new Random(seed * 31 + 7);
         var strip = size / HairMeshBuilder.AtlasColumns;
-        var width = Math.Max(1.1f, size / 900f); // a hair is a little over a texel wide at 1024
+        var width = Math.Max(1.1f, size / 900f) * s.HairThickness;
         for (var col = 0; col < HairMeshBuilder.AtlasColumns; col++)
         {
             for (var k = 0; k < s.HairsPerCard; k++)
@@ -51,6 +51,60 @@ public static class HairAtlas
             }
         }
         return px;
+    }
+
+    /// <summary>The alpha cutoff hair is drawn with (the game's alpha test, and the preview's).</summary>
+    public const float Cutoff = 0.35f;
+
+    /// <summary>
+    /// The mip chain for the atlas, each level half the last (down to 1×1). Colour is averaged by coverage, and each
+    /// level's alpha is scaled so the same share of texels clears the cutoff as at full size: thin hairs then thicken
+    /// into soft tufts with distance instead of fading below the cutoff and vanishing.
+    /// </summary>
+    public static List<byte[]> Mips(byte[] level0, int size)
+    {
+        var levels = new List<byte[]> { level0 };
+        var target = Coverage(level0, 1f);
+        var prev = level0;
+        for (var s = size / 2; s >= 1; s /= 2)
+        {
+            var next = new byte[s * s * 4];
+            var ps = s * 2;
+            for (var y = 0; y < s; y++)
+            for (var x = 0; x < s; x++)
+            {
+                float a = 0, r = 0, g = 0, b = 0;
+                for (var j = 0; j < 2; j++)
+                for (var i = 0; i < 2; i++)
+                {
+                    var o = ((y * 2 + j) * ps + x * 2 + i) * 4;
+                    var w = prev[o + 3];
+                    a += w; r += prev[o] * w; g += prev[o + 1] * w; b += prev[o + 2] * w;
+                }
+                var q = (y * s + x) * 4;
+                if (a > 0) { next[q] = (byte)(r / a); next[q + 1] = (byte)(g / a); next[q + 2] = (byte)(b / a); }
+                next[q + 3] = (byte)(a / 4);
+            }
+            // the alpha scale that keeps coverage: a binary search on the share of texels over the cutoff
+            float lo = 0.5f, hi = 16f;
+            for (var it = 0; it < 14; it++)
+            {
+                var mid = (lo + hi) / 2;
+                if (Coverage(next, mid) < target) lo = mid; else hi = mid;
+            }
+            var scale = (lo + hi) / 2;
+            for (var q = 3; q < next.Length; q += 4) next[q] = (byte)Math.Min(255, next[q] * scale);
+            levels.Add(next);
+            prev = next;
+        }
+        return levels;
+    }
+
+    private static float Coverage(byte[] px, float scale)
+    {
+        var over = 0; var cut = Cutoff * 255;
+        for (var q = 3; q < px.Length; q += 4) if (px[q] * scale > cut) over++;
+        return over / (float)(px.Length / 4);
     }
 
     /// <summary>Draws one anti-aliased dot of a hair, keeping whichever hair covers a texel most.</summary>

@@ -184,6 +184,8 @@ public sealed class HairMeshLayer : Layer
     [Range(0, 1)] public float Strays { get; set; } = 0.3f;
     /// <summary>Hairs drawn on each card's texture strip.</summary>
     [Range(4, 60)] public int HairsPerCard { get; set; } = 28;
+    /// <summary>How thick the hairs on the card texture are: thicker survive better at a distance.</summary>
+    [Range(0.5f, 4)] public float HairThickness { get; set; } = 1.5f;
     /// <summary>Direction: down the body, leaning in towards the centre line (negative) or out (positive).</summary>
     [Range(-1, 1)] public float LeanInOut { get; set; } = 0f;
     /// <summary>Slow swirls in the flow, so it doesn't all run one way.</summary>
