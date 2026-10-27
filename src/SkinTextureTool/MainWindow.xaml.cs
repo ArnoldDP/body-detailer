@@ -62,6 +62,8 @@ public partial class MainWindow : Window
         public bool SkipBeasts { get; set; } = true;
         public bool ZipOutput { get; set; }
         public bool AutoUpdate { get; set; } = true;
+        public int HeadSize { get; set; }
+        public int LimbSize { get; set; }
     }
 
     public MainWindow()
@@ -89,6 +91,8 @@ public partial class MainWindow : Window
         Patcher.Bands = (state.NeckBand, state.LimbBand);
         Patcher.Options = (state.SkipBeasts, state.ZipOutput);
         AutoUpdateBox.IsChecked = state.AutoUpdate;
+        HeadSizeBox.SelectedIndex = Math.Clamp(state.HeadSize, 0, HeadSizeBox.Items.Count - 1);
+        LimbSizeBox.SelectedIndex = Math.Clamp(state.LimbSize, 0, LimbSizeBox.Items.Count - 1);
         Settings.Changed += () => _debounce.Start();
         Settings.GeometryChanged += () => _geometryDebounce.Start();
         Sliders.Changed += () => _geometryDebounce.Start();
@@ -379,6 +383,15 @@ public partial class MainWindow : Window
     private int PreviewSize => int.Parse(((ComboBoxItem)PreviewSizeBox.SelectedItem).Content.ToString()!);
     private int ExportSize => int.Parse(((ComboBoxItem)ExportSizeBox.SelectedItem).Content.ToString()!);
 
+    /// <summary>The export size for a texture group: heads and hands/feet can have their own, otherwise the body's.</summary>
+    private int ExportSizeFor(string group)
+    {
+        var box = group.Contains("head", StringComparison.OrdinalIgnoreCase) ? HeadSizeBox
+            : group.Contains("hand", StringComparison.OrdinalIgnoreCase) || group.Contains("feet", StringComparison.OrdinalIgnoreCase)
+              || group.Contains("foot", StringComparison.OrdinalIgnoreCase) ? LimbSizeBox : null;
+        return box != null && int.TryParse(((ComboBoxItem)box.SelectedItem).Content.ToString(), out var n) ? n : ExportSize;
+    }
+
     private void OnPreviewSizeChanged(object sender, SelectionChangedEventArgs e) { if (IsLoaded) Regenerate(); }
 
     private void OnModeChanged(object sender, SelectionChangedEventArgs e)
@@ -595,12 +608,12 @@ public partial class MainWindow : Window
             await EnsureExistingTexturesAsync(snapshot);
             await EnsureVeinNetworkAsync(snapshot);
             var images = new Dictionary<string, int>(_imageTextures, StringComparer.OrdinalIgnoreCase);
-            var size = ExportSize;
             var rfaos = RfaosBox.IsChecked == true;
             var gamePaths = GamePathsBox.IsChecked == true;
             var written = new List<string>();
             foreach (var group in _groups)
             {
+                var size = ExportSizeFor(group);
                 Status($"Generating {group} at {size}×{size}…");
                 var textures = await Preview.Run(() =>
                 {
@@ -791,6 +804,8 @@ public partial class MainWindow : Window
                 SkipBeasts = Patcher.Options.SkipBeasts,
                 ZipOutput = Patcher.Options.Zip,
                 AutoUpdate = AutoUpdateBox.IsChecked == true,
+                HeadSize = HeadSizeBox.SelectedIndex,
+                LimbSize = LimbSizeBox.SelectedIndex,
             };
             File.WriteAllText(StateFile, JsonSerializer.Serialize(state, new JsonSerializerOptions { WriteIndented = true }));
         }

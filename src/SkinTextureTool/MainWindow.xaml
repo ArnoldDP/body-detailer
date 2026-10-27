@@ -66,8 +66,26 @@
                     </DockPanel>
 
                     <TextBlock Text="Export" FontWeight="SemiBold" Margin="0,14,0,2"/>
-                    <TextBlock Text="Size"/>
+                    <TextBlock Text="Size (body)"/>
                     <ComboBox x:Name="ExportSizeBox" SelectedIndex="2">
+                        <ComboBoxItem Content="1024"/>
+                        <ComboBoxItem Content="2048"/>
+                        <ComboBoxItem Content="4096"/>
+                        <ComboBoxItem Content="8192"/>
+                    </ComboBox>
+                    <TextBlock Text="Head size" Margin="0,4,0,0"/>
+                    <ComboBox x:Name="HeadSizeBox" SelectedIndex="0">
+                        <ComboBoxItem Content="Same as body"/>
+                        <ComboBoxItem Content="512"/>
+                        <ComboBoxItem Content="1024"/>
+                        <ComboBoxItem Content="2048"/>
+                        <ComboBoxItem Content="4096"/>
+                        <ComboBoxItem Content="8192"/>
+                    </ComboBox>
+                    <TextBlock Text="Hands and feet size" Margin="0,4,0,0"/>
+                    <ComboBox x:Name="LimbSizeBox" SelectedIndex="0">
+                        <ComboBoxItem Content="Same as body"/>
+                        <ComboBoxItem Content="512"/>
                         <ComboBoxItem Content="1024"/>
                         <ComboBoxItem Content="2048"/>
                         <ComboBoxItem Content="4096"/>
