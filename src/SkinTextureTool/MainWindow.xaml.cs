@@ -549,6 +549,8 @@ public partial class MainWindow : Window
     private readonly Dictionary<string, (DateTime Stamp, float[] Grey, int W, int H)> _hairMasks = new(StringComparer.OrdinalIgnoreCase);
     private bool _hairBuilding, _hairAgain;
     private string? _atlasKey;
+    private byte[]? _hairAtlasPixels;
+    private (HairMesh Mesh, IReadOnlyList<ShapeData> Surfaces, HairMeshLayer Look, byte[] Atlas)? _hairBuilt;
     private const int HairAtlasSize = 1024;
 
     /// <summary>Grows the hair cards from the hair mesh settings and its masks, and shows them in the preview.</summary>
@@ -597,11 +599,13 @@ public partial class MainWindow : Window
                 if (atlasKey != _atlasKey)
                 {
                     var atlas = await Task.Run(() => HairAtlas.Generate(HairAtlasSize, snapshot, seed));
+                    _hairAtlasPixels = atlas;
                     await Preview.Run(() => Preview.Renderer.SetHairAtlas(atlas, HairAtlasSize));
                     _atlasKey = atlasKey;
                 }
                 var mesh = await Task.Run(() => HairMeshBuilder.Build(surfaces, snapshot, seed));
                 await Preview.Run(() => Preview.Renderer.SetHairMesh(mesh, snapshot.Color, snapshot.RootDarkening));
+                _hairBuilt = (mesh, surfaces.Select(x => x.Shape).ToList(), snapshot, _hairAtlasPixels!);
                 HairInfo.Text = $"Hair mesh: {mesh.CardCount:N0} cards, {mesh.TriangleCount:N0} triangles, {mesh.VertexCount:N0} vertices"
                                 + (mesh.Dropped > 0 ? $" ({mesh.Dropped:N0} cards over the budget left out)" : "");
                 Preview.Refresh();
@@ -614,6 +618,30 @@ public partial class MainWindow : Window
         finally
         {
             _hairBuilding = false;
+        }
+    }
+
+    private async void OnExportHair(object sender, RoutedEventArgs e)
+    {
+        if (_hairBuilt is not { } built || built.Mesh.VertexCount == 0) { Status("Enable Hair Mesh and give it a mask first."); return; }
+        var folder = ExportFolderBox.Text.Trim();
+        if (folder.Length == 0) { Status("Choose an export folder first."); return; }
+        HairExportButton.IsEnabled = false;
+        try
+        {
+            Status("Writing the hair mesh…");
+            var sets = built.Surfaces.Select(s => Sliders.SetFor(s.NifPath)).ToList();
+            var name = HairNameBox.Text;
+            var result = await Task.Run(() => HairExporter.Export(folder, name, built.Mesh, built.Surfaces, sets, built.Look, built.Atlas, HairAtlasSize));
+            Status($"Wrote {result.Written.Count} hair file(s) to {folder}. " + string.Join(" ", result.Notes));
+        }
+        catch (Exception ex)
+        {
+            Status("Hair export failed: " + ex.Message);
+        }
+        finally
+        {
+            HairExportButton.IsEnabled = true;
         }
     }
 

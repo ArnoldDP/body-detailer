@@ -117,6 +117,12 @@
                                Text="Each texture group is written as name.dds, name_msn.dds, name_s.dds and name_sk.dds (BC7 with mipmaps)."/>
                     <Button x:Name="ExportButton" Content="Export textures" Margin="0,8,0,0" Padding="0,6" FontWeight="SemiBold"
                             Click="OnExport" IsEnabled="False"/>
+
+                    <TextBlock Text="Hair mesh" FontWeight="SemiBold" Margin="0,14,0,2"/>
+                    <TextBlock Text="Name"/>
+                    <TextBox x:Name="HairNameBox" Text="Pubic Hair"/>
+                    <Button x:Name="HairExportButton" Content="Export hair mesh" Margin="0,6,0,0" Padding="0,4" Click="OnExportHair"
+                            ToolTip="Writes the hair NIF (_0 and _1), its textures and a BodySlide project into the export folder"/>
                 </StackPanel>
             </ScrollViewer>
 
