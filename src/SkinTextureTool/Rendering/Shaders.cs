@@ -258,6 +258,7 @@ internal static class Shaders
             // sit on a jittered grid in the surface's local frame (along the flow, across it); each strand runs from its
             // root along the flow with its own angle, length, bend and (for curl) wave, tapering to a fine tip. A texel
             // checks the strands whose roots are close enough to reach it and draws the nearest as an anti-aliased line.
+            float hairGloss = 0.0; // strand specular, brightest from the middle of each hair to its tip
             if (uHair.x > 0.5) {
                 vec3 n = normalize(vNrm);
                 vec3 dir = normalize(vec3(sign(vPos.x + 1e-4) * uHair2.y, 0.0, -1.0));
@@ -283,14 +284,19 @@ internal static class Shaders
                 float width = max(0.014, 0.6 * uFootprint);
                 float thin = sqrt(min(1.0, 0.014 / width));
                 float len = 0.6 * uHair.w;                      // strand length (body units; ~0.9 cm per step)
-                float spacing = max(0.45 / uHair.z, len / 5.0);
+                // roots per layer are spaced for the strand length (a texel checks at most 11x11); density adds layers,
+                // so thick hair (pubic, armpits) is many overlapping layers rather than impossibly close roots
+                float spacing = max(0.45, len / 5.0);
+                int layers = clamp(int(ceil(uHair.z * 3.0)), 1, 12);
                 int reach = min(int(ceil(len / spacing)), 5);
                 // skin: a light stubble tint under the hair
                 col = mix(col, col * mix(vec3(1.0), uHairColor * 2.2, 0.6), uHair.y * 0.25 * (1.0 - uHair2.z * 0.6));
-                // four offset layers, deepest first: deeper strands are darker and covered by those above
+                // offset layers, deepest first: deeper strands are darker and covered by those above
                 float cover = 0.0, topH = 0.0; vec3 topC = uHairColor;
-                for (int L = 0; L < 4; L++) {
-                    vec2 luv = uv2 + vec2(0.37, 0.61) * spacing * float(L);
+                for (int L = 0; L < 12; L++) {
+                    if (L >= layers) break;
+                    float depth = float(L) / float(max(layers - 1, 1)); // 0 deepest, 1 on top
+                    vec2 luv = uv2 + vec2(0.37, 0.61) * spacing * float(L) + vec2(0.13, 0.29) * spacing * float(L * L);
                     vec2 cell = floor(luv / spacing);
                     for (int dy = -5; dy <= 5; dy++)
                     for (int dx = -5; dx <= 5; dx++) {
@@ -315,23 +321,26 @@ internal static class Shaders
                         float a = (1.0 - smoothstep(w * 0.35, w, abs(off))) * thin
                                 * mix(0.45, 0.85, h.y) * smoothstep(1.0, 0.8, t) * smoothstep(0.0, 0.04, t);
                         if (a <= 0.0) continue;
-                        float shade = (0.7 + 0.1 * float(L)) * mix(0.85, 1.05, t) * mix(0.85, 1.1, h2.y);
-                        vec3 hc = min(uHairColor * shade, col * (0.5 + 0.08 * float(L))); // always darker than the skin
+                        float shade = (0.7 + 0.3 * depth) * mix(0.85, 1.05, t) * mix(0.85, 1.1, h2.y);
+                        vec3 hc = min(uHairColor * shade, col * (0.5 + 0.24 * depth)); // always darker than the skin
                         a *= 0.55 + 0.45 * uHair.y;
                         col = mix(col, hc, a);
+                        hairGloss = mix(hairGloss, smoothstep(0.35, 0.65, t) * smoothstep(1.0, 0.85, t) * (0.6 + 0.4 * depth), a);
                         cover = 1.0 - (1.0 - cover) * (1.0 - a);
-                        float sh = a * mix(0.6, 1.0, h.z) * (1.0 - t * 0.35) * (0.7 + 0.1 * float(L));
-                        if (sh > topH) { topH = sh; topC = hc; }
+                        float sh = smoothstep(0.08, 0.3, a) * mix(0.6, 1.0, h.z) * (1.0 - t * 0.35) * (0.7 + 0.3 * depth);
+                        if (L >= layers - 2 && sh > topH) { topH = sh; topC = hc; } // shells grow from the top two layers only
                     }
                 }
                 height += cover * 0.0015;
-                float hairShell = clamp(max(topH, cover * 0.8), 0.0, 1.0);
+                // the shell marks single strands only, with gaps between them, so shells grow as hairs and not as a slab
+                float hairShell = clamp(topH, 0.0, 1.0);
                 if (hairShell > shell.a) shell = vec4(clamp(topC, 0.0, 1.0), hairShell);
             }
 
             float spec = uMaterial.x * (1.0 - uMaterial.y * (0.5 + 0.5 * fbm(p * 0.2 + 131.0, 3)));
             if (hExSpec == 1) spec = mix(spec, texture(uExSpec, vUv).r, uExMix.y);
             spec *= 1.0 - poreAmount * 0.5;
+            spec = max(spec, hairGloss * 0.55);
 
             oAlbedo = vec4(clamp(col, 0.0, 1.0), 1.0);
             oHeight = vec4(height, 0.0, 0.0, 1.0);
