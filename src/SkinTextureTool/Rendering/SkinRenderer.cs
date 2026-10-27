@@ -51,6 +51,9 @@ internal sealed class SkinRenderer
     private readonly List<Group> _groups = new();
     private int _emptyVao;
     private float _footprint = 0.05f;
+    private (int Count, float Length, float Droop, Vector4 Look) _fur;
+    /// <summary>The preview mode that draws the lit skin with fur shells over it.</summary>
+    public const int LitWithShells = 7;
     private int _fbo;
     private readonly Dictionary<string, int> _images = new(StringComparer.OrdinalIgnoreCase);
 
@@ -225,6 +228,19 @@ internal sealed class SkinRenderer
     /// </summary>
     public void Generate(SkinSettings s, int size, IReadOnlyDictionary<string, int> images, string? only = null)
     {
+        // the fur shells the preview draws: fur's when it's on, otherwise body hair's (as the export writes them)
+        if (s.Fur.Enabled && s.Fur.ExportShells)
+            _fur = (s.Fur.ShellCount, s.Fur.ShellLength, s.Fur.Droop, new Vector4(s.Fur.RootThreshold, s.Fur.TipThreshold, s.Fur.RootDarkening, s.Fur.ShellColor));
+        else if (s.BodyHair.Enabled && s.BodyHair.ExportShells)
+            _fur = (s.BodyHair.ShellCount, s.BodyHair.ShellLength, s.BodyHair.Droop, new Vector4(0, 1, s.BodyHair.RootDarkening, 1));
+        else if (s.Regions.FirstOrDefault(r => r.Enabled && r.Strength > 0 && (r.Settings.Fur.Enabled || r.Settings.BodyHair.Enabled)) is { } region)
+        {
+            var rs = region.Settings;
+            _fur = rs.Fur.Enabled
+                ? (rs.Fur.ShellCount, rs.Fur.ShellLength, rs.Fur.Droop, new Vector4(rs.Fur.RootThreshold, rs.Fur.TipThreshold, rs.Fur.RootDarkening, rs.Fur.ShellColor))
+                : (rs.BodyHair.ShellCount, rs.BodyHair.ShellLength, rs.BodyHair.Droop, new Vector4(0, 1, rs.BodyHair.RootDarkening, 1));
+        }
+        else _fur = (0, 0, 0, default);
         if (_generate == null || _bake == null || _bleed == null) return;
         GL.GetInteger(GetPName.FramebufferBinding, out int previousFbo);
         var previousViewport = new int[4];
@@ -479,9 +495,14 @@ internal sealed class SkinRenderer
         _preview.Set("uMvp", mvp);
         _preview.Set("uEye", eye);
         _preview.Set("uLight", light);
+        var shells = mode == LitWithShells;
+        if (shells) mode = 0;
         _preview.Set("uMode", mode);
         _preview.Set("uBrush", brush);
         _preview.Set("uBrushMirror", brushMirror);
+        _preview.Set("uShellT", 0f);
+        _preview.Set("uFur", new Vector2(_fur.Length, _fur.Droop));
+        _preview.Set("uFurLook", _fur.Look);
         foreach (var g in _groups)
         {
             _preview.Set("uReady", g.Ready ? 1 : 0);
@@ -499,6 +520,19 @@ internal sealed class SkinRenderer
             _preview.Set("uHasPaint", paint != 0 ? 1 : 0);
             DrawShapes(g);
         }
+        if (!shells || _fur.Count == 0) return;
+        foreach (var g in _groups.Where(g => g.Ready && g.HasShell))
+        {
+            _preview.Texture("uAlbedo", 0, g.Albedo);
+            _preview.Texture("uNormal", 1, g.Normal);
+            _preview.Texture("uShell", 6, g.Shell);
+            for (var k = 1; k <= _fur.Count; k++)
+            {
+                _preview.Set("uShellT", k / (float)_fur.Count);
+                DrawShapes(g);
+            }
+        }
+        _preview.Set("uShellT", 0f);
     }
 
     public IReadOnlyList<string> GroupNames => _groups.Select(g => g.Name).ToList();

@@ -102,6 +102,7 @@
                         <ComboBoxItem Content="Subsurface (_sk)"/>
                         <ComboBoxItem Content="RFAOS (roughness, fuzz, AO)"/>
                         <ComboBoxItem Content="Fur shell (strand pattern)"/>
+                        <ComboBoxItem Content="Lit with fur shells (as in game)"/>
                     </ComboBox>
                 </StackPanel>
                 <TextBlock DockPanel.Dock="Bottom" Foreground="Gray" Margin="0,6,0,0"

@@ -489,8 +489,21 @@ internal static class Shaders
         layout(location=1) in vec2 aUv;
         layout(location=2) in vec3 aNrm;
         uniform mat4 uMvp;
+        // fur shells, as Open Shaders' Fur Shells draws them: layer height (0 = the skin itself), fur length, droop.
+        // A layer grows along the model-space normal map read at a low mip, then droops down quadratically.
+        uniform float uShellT; uniform vec2 uFur; uniform sampler2D uNormal;
         out vec2 vUv; out vec3 vNrm; out vec3 vPos;
-        void main() { vUv = aUv; vNrm = aNrm; vPos = aPos; gl_Position = uMvp * vec4(aPos, 1.0); }
+        void main() {
+            vUv = aUv; vNrm = aNrm; vec3 p = aPos;
+            if (uShellT > 0.0) {
+                float lod = max(log2(float(textureSize(uNormal, 0).x)) - 9.0, 0.0);
+                vec3 n = textureLod(uNormal, aUv, lod).xzy * 2.0 - 1.0;
+                n *= inversesqrt(max(dot(n, n), 1e-6));
+                p += n * (uFur.x * uShellT);
+                p.z -= min(uFur.y * uShellT * uShellT, uFur.x * uShellT);
+            }
+            vPos = p; gl_Position = uMvp * vec4(p, 1.0);
+        }
         """;
 
     /// <summary>Preview: lit with the baked model-space normal map, or one channel shown flat.</summary>
@@ -502,6 +515,8 @@ internal static class Shaders
         uniform int uMode; uniform int uReady; uniform vec3 uLight; uniform vec3 uEye;
         uniform sampler2D uPaint; uniform int uHasPaint;
         uniform vec4 uBrush, uBrushMirror; // centre, radius (0 = hidden)
+        // fur shells: layer height, (root threshold, tip threshold, root darkening, shell colour)
+        uniform float uShellT; uniform vec4 uFurLook;
         vec3 shade();
         // the painted mask tinted over the surface, and the brush outline
         vec3 overlay(vec3 c) {
@@ -516,7 +531,27 @@ internal static class Shaders
             }
             return c;
         }
-        void main() { frag = vec4(overlay(shade()), 1.0); }
+        void main() {
+            if (uShellT > 0.0) {
+                // a strand survives at this layer where its height (shell alpha) clears the threshold for the layer,
+                // softened by a spread that grows with the mip, and dithered rather than blended
+                vec4 sh = texture(uShell, vUv);
+                float threshold = mix(uFurLook.x, uFurLook.y, uShellT);
+                float lod = max(log2(max(length(dFdx(vUv)), length(dFdy(vUv))) * float(textureSize(uShell, 0).x)), 0.0);
+                float spread = 0.75 * clamp(lod / 3.0, 0.0, 1.0) * sh.a;
+                float coverage = clamp((sh.a + spread - threshold) / max(2.0 * spread, 1e-4), 0.0, 1.0);
+                float noise = fract(52.9829189 * fract(dot(gl_FragCoord.xy, vec2(0.06711056, 0.00583715))));
+                if (coverage < noise) discard;
+                vec3 albedo = mix(texture(uAlbedo, vUv).rgb, sh.rgb, uFurLook.w);
+                vec3 n = normalize(texture(uNormal, vUv).rgb.xzy * 2.0 - 1.0);
+                vec3 v = normalize(uEye - vPos);
+                float facing = abs(dot(normalize(cross(dFdx(vPos), dFdy(vPos))), v));
+                albedo *= mix(1.0, mix(uFurLook.z, 1.0, uShellT), smoothstep(0.0, 0.5, facing));
+                frag = vec4(albedo * (0.3 + 0.7 * max(dot(n, uLight), 0.0)), 1.0);
+                return;
+            }
+            frag = vec4(overlay(shade()), 1.0);
+        }
         vec3 shade() {
             if (uReady == 0) return vec3(0.6) * (0.4 + 0.6 * abs(dot(normalize(vNrm), uLight)));
             vec3 albedo = texture(uAlbedo, vUv).rgb;
