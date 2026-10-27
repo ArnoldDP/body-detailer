@@ -334,9 +334,6 @@ internal static class Shaders
                     }
                 }
                 height += cover * 0.0015 + ridge * uHair2.w * 0.006;
-                // the shell marks single strands only, with gaps between them, so shells grow as hairs and not as a slab
-                float hairShell = clamp(topH, 0.0, 1.0);
-                if (hairShell > shell.a) shell = vec4(clamp(topC, 0.0, 1.0), hairShell);
             }
 
             float spec = uMaterial.x * (1.0 - uMaterial.y * (0.5 + 0.5 * fbm(p * 0.2 + 131.0, 3)));

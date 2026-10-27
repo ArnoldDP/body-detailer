@@ -684,13 +684,13 @@ public partial class MainWindow : Window
                     };
                     if (rfaos) jobs.Add(() => DdsExporter.Write(Out(-1, "_rfaos.dds"), textures.Rfaos, size, size, formats["rfaos"]));
                     // Bottled Shaders fur shells: matched by name next to the diffuse
-                    if (textures.Shell != null && (snapshot.Fur.Enabled ? snapshot.Fur.ExportShells : snapshot.BodyHair.ExportShells))
+                    if (textures.Shell != null && snapshot.Fur.Enabled && snapshot.Fur.ExportShells)
                     {
                         var shell = FillUncovered(textures.Shell, textures.Albedo, size);
                         var shellSize = shellTarget > 0 ? Math.Min(shellTarget, size) : size;
                         shell = DdsExporter.Downscale(shell, size, shellSize);
                         jobs.Add(() => DdsExporter.Write(Out(-1, "_shell.dds"), shell, shellSize, shellSize, formats["shell"]));
-                        jobs.Add(() => File.WriteAllText(Out(-1, "_shell.json"), snapshot.Fur.Enabled ? ShellJson(snapshot.Fur) : ShellJson(snapshot.BodyHair)));
+                        jobs.Add(() => File.WriteAllText(Out(-1, "_shell.json"), ShellJson(snapshot.Fur)));
                     }
                     Parallel.Invoke(jobs.ToArray());
                 });
@@ -723,13 +723,6 @@ public partial class MainWindow : Window
         ["Droop"] = f.Droop, ["Enabled"] = true, ["FadeEnd"] = f.FadeEnd, ["FadeStart"] = f.FadeStart, ["Length"] = f.ShellLength,
         ["RootDarkening"] = f.RootDarkening, ["RootThreshold"] = f.RootThreshold, ["ShellColor"] = f.ShellColor,
         ["ShellCount"] = f.ShellCount, ["TipThreshold"] = f.TipThreshold,
-    }, new JsonSerializerOptions { WriteIndented = true });
-
-    /// <summary>Shell settings for body hair alone (no fur): full shell colour, thresholds spanning the whole strand.</summary>
-    private static string ShellJson(BodyHairLayer h) => JsonSerializer.Serialize(new Dictionary<string, object>
-    {
-        ["Droop"] = h.Droop, ["Enabled"] = true, ["FadeEnd"] = h.FadeEnd, ["FadeStart"] = h.FadeStart, ["Length"] = h.ShellLength,
-        ["RootDarkening"] = h.RootDarkening, ["RootThreshold"] = 0.0, ["ShellColor"] = 1.0, ["ShellCount"] = h.ShellCount, ["TipThreshold"] = 1.0,
     }, new JsonSerializerOptions { WriteIndented = true });
 
     /// <summary>

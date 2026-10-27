@@ -149,15 +149,6 @@ public sealed class BodyHairLayer : Layer
     [Range(-1, 1)] public float LeanInOut { get; set; } = 0f;
     /// <summary>How sparse the hair is: 0 a full covering, 1 scattered strands.</summary>
     [Range(0, 1)] public float Sparseness { get; set; } = 0.2f;
-
-    // Bottled Shaders shells, used when the Fur layer is off (with fur on, its shell settings apply)
-    public bool ExportShells { get; set; } = true;
-    [Range(1, 32)] public int ShellCount { get; set; } = 16;
-    [Range(0, 4)] public float ShellLength { get; set; } = 1.6f;
-    [Range(0, 1)] public float Droop { get; set; } = 0.6f;
-    [Range(0, 1)] public float RootDarkening { get; set; } = 0.8f;
-    [Range(0, 8000)] public float FadeStart { get; set; } = 700f;
-    [Range(0, 8000)] public float FadeEnd { get; set; } = 2500f;
 }
 
 /// <summary>

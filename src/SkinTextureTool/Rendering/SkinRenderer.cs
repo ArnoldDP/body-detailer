@@ -228,17 +228,13 @@ internal sealed class SkinRenderer
     /// </summary>
     public void Generate(SkinSettings s, int size, IReadOnlyDictionary<string, int> images, string? only = null)
     {
-        // the fur shells the preview draws: fur's when it's on, otherwise body hair's (as the export writes them)
+        // the fur shells the preview draws: the fur layer's, or the first region's with fur
         if (s.Fur.Enabled && s.Fur.ExportShells)
             _fur = (s.Fur.ShellCount, s.Fur.ShellLength, s.Fur.Droop, new Vector4(s.Fur.RootThreshold, s.Fur.TipThreshold, s.Fur.RootDarkening, s.Fur.ShellColor));
-        else if (s.BodyHair.Enabled && s.BodyHair.ExportShells)
-            _fur = (s.BodyHair.ShellCount, s.BodyHair.ShellLength, s.BodyHair.Droop, new Vector4(0, 1, s.BodyHair.RootDarkening, 1));
-        else if (s.Regions.FirstOrDefault(r => r.Enabled && r.Strength > 0 && (r.Settings.Fur.Enabled || r.Settings.BodyHair.Enabled)) is { } region)
+        else if (s.Regions.FirstOrDefault(r => r.Enabled && r.Strength > 0 && r.Settings.Fur.Enabled) is { } region)
         {
-            var rs = region.Settings;
-            _fur = rs.Fur.Enabled
-                ? (rs.Fur.ShellCount, rs.Fur.ShellLength, rs.Fur.Droop, new Vector4(rs.Fur.RootThreshold, rs.Fur.TipThreshold, rs.Fur.RootDarkening, rs.Fur.ShellColor))
-                : (rs.BodyHair.ShellCount, rs.BodyHair.ShellLength, rs.BodyHair.Droop, new Vector4(0, 1, rs.BodyHair.RootDarkening, 1));
+            var rf = region.Settings.Fur;
+            _fur = (rf.ShellCount, rf.ShellLength, rf.Droop, new Vector4(rf.RootThreshold, rf.TipThreshold, rf.RootDarkening, rf.ShellColor));
         }
         else _fur = (0, 0, 0, default);
         if (_generate == null || _bake == null || _bleed == null) return;
@@ -336,9 +332,9 @@ internal sealed class SkinRenderer
 
         // 4. fur and body hair shell texture (strand heights, fur/hair colour): the base skin's, then each region's
         //    blended in through its mask, so hair enabled only in a region lands only there
-        var shellRegions = s.Regions.Where(r => r.Enabled && r.Strength > 0 && (r.Settings.Fur.Enabled || r.Settings.BodyHair.Enabled))
+        var shellRegions = s.Regions.Where(r => r.Enabled && r.Strength > 0 && r.Settings.Fur.Enabled)
             .Select(r => (Region: r, Mask: Image(images, r.MaskFor(g.Name)))).Where(x => x.Mask != 0).ToList();
-        g.HasShell = s.Fur.Enabled || s.BodyHair.Enabled || shellRegions.Count > 0;
+        g.HasShell = s.Fur.Enabled || shellRegions.Count > 0;
         if (g.HasShell)
         {
             RenderShell(g, s, images, g.Shell);
