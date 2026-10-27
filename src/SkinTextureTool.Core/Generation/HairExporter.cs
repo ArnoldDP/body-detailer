@@ -199,7 +199,16 @@ public static class HairExporter
         var dataDir = Path.Combine(bodySlide, "ShapeData", name);
         WriteNif(sourceNif, surfaces.Select(s => s.Name).ToList(), mesh, positions, Path.Combine(dataDir, name + ".nif"), file, diffuseRel, normalRel);
 
-        // each slider's offsets for the hair: the root triangle's offsets blended by the root's weights
+        // each slider's offsets for the hair, conformed as Outfit Studio does it: every hair vertex takes the offsets
+        // of the body vertices nearest to it (distance weighted), so a card follows the skin under each part of it,
+        // not just under its root
+        var nearest = new (int Surface, int[] Vertices, float[] Weights)[mesh.VertexCount];
+        Parallel.For(0, mesh.VertexCount, v =>
+        {
+            var si = mesh.RootSurface[v];
+            var (verts, weights) = Nearest(refPositions[si], positions[v * 3], positions[v * 3 + 1], positions[v * 3 + 2]);
+            nearest[v] = (si, verts, weights);
+        });
         var osdCache = new Dictionary<string, Dictionary<string, OsdFile.Diff[]>>(StringComparer.OrdinalIgnoreCase);
         var entries = new List<(string Slider, string Entry, Dictionary<int, System.Numerics.Vector3> Diffs)>();
         foreach (var slider in set.Sliders.Where(s => s.MovesVertices))
@@ -219,10 +228,10 @@ public static class HairExporter
             var hairDiffs = new Dictionary<int, System.Numerics.Vector3>();
             for (var v = 0; v < mesh.VertexCount; v++)
             {
-                var src = perSurface[mesh.RootSurface[v]];
+                var (si, verts, weights) = nearest[v];
                 var sum = System.Numerics.Vector3.Zero;
-                for (var k = 0; k < 3; k++)
-                    if (src.TryGetValue(mesh.RootVertices[v * 3 + k], out var d)) sum += d * mesh.RootWeights[v * 3 + k];
+                for (var k = 0; k < verts.Length; k++)
+                    if (perSurface[si].TryGetValue(verts[k], out var d)) sum += d * weights[k];
                 if (sum.LengthSquared() > 1e-10f) hairDiffs[v] = sum;
             }
             if (hairDiffs.Count > 0) entries.Add((slider.Name, file + slider.Name, hairDiffs));
@@ -252,6 +261,26 @@ public static class HairExporter
         new XDocument(new XElement("SliderSetInfo", new XAttribute("version", 1), project)).Save(Path.Combine(output, ospRel));
         notes.Add($"BodySlide: build \"{name}\" with your body preset to fit the hair to it ({entries.Count} sliders carried over from {set.Name}).");
         return new[] { ospRel, Path.Combine("CalienteTools", "BodySlide", "ShapeData", name, name + ".nif"), Path.Combine("CalienteTools", "BodySlide", "ShapeData", name, name + ".osd") };
+    }
+
+    /// <summary>The few body vertices nearest a point and their weights (inverse square distance, summing to 1).</summary>
+    public static (int[] Vertices, float[] Weights) Nearest(float[] body, float x, float y, float z, int count = 6)
+    {
+        var best = new (float D, int I)[count];
+        for (var k = 0; k < count; k++) best[k] = (float.MaxValue, -1);
+        for (var j = 0; j < body.Length / 3; j++)
+        {
+            var dx = body[j * 3] - x; var dy = body[j * 3 + 1] - y; var dz = body[j * 3 + 2] - z;
+            var d = dx * dx + dy * dy + dz * dz;
+            if (d >= best[count - 1].D) continue;
+            var k = count - 1;
+            while (k > 0 && best[k - 1].D > d) { best[k] = best[k - 1]; k--; }
+            best[k] = (d, j);
+        }
+        var found = best.Where(b => b.I >= 0).ToArray();
+        var w = found.Select(b => 1f / (b.D + 1e-4f)).ToArray();
+        var total = w.Sum();
+        return (found.Select(b => b.I).ToArray(), w.Select(x => x / total).ToArray());
     }
 
     /// <summary>A BodySlide .osd: "\0DSO" header, version 1, then each entry's name and (vertex, offset) pairs.</summary>
