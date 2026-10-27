@@ -91,6 +91,14 @@
                         <ComboBoxItem Content="4096"/>
                         <ComboBoxItem Content="8192"/>
                     </ComboBox>
+                    <Expander Header="Compression" Margin="0,6,0,0">
+                        <Grid x:Name="CompressionGrid" Margin="0,4,0,0">
+                            <Grid.ColumnDefinitions>
+                                <ColumnDefinition Width="Auto"/>
+                                <ColumnDefinition Width="*"/>
+                            </Grid.ColumnDefinitions>
+                        </Grid>
+                    </Expander>
                     <TextBlock Text="Folder" Margin="0,6,0,0"/>
                     <DockPanel>
                         <Button DockPanel.Dock="Right" Content="…" Width="26" Margin="4,0,0,0" Click="OnBrowseExport"/>

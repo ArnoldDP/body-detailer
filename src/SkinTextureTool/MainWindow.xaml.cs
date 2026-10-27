@@ -62,6 +62,8 @@ public partial class MainWindow : Window
         public bool SkipBeasts { get; set; } = true;
         public bool ZipOutput { get; set; }
         public bool AutoUpdate { get; set; } = true;
+        public Dictionary<string, DdsFormat> Formats { get; set; } = new();
+        public int ShellSize { get; set; }
         public int HeadSize { get; set; }
         public int LimbSize { get; set; }
     }
@@ -91,6 +93,7 @@ public partial class MainWindow : Window
         Patcher.Bands = (state.NeckBand, state.LimbBand);
         Patcher.Options = (state.SkipBeasts, state.ZipOutput);
         AutoUpdateBox.IsChecked = state.AutoUpdate;
+        BuildCompressionRows(state);
         HeadSizeBox.SelectedIndex = Math.Clamp(state.HeadSize, 0, HeadSizeBox.Items.Count - 1);
         LimbSizeBox.SelectedIndex = Math.Clamp(state.LimbSize, 0, LimbSizeBox.Items.Count - 1);
         Settings.Changed += () => _debounce.Start();
@@ -383,6 +386,41 @@ public partial class MainWindow : Window
     private int PreviewSize => int.Parse(((ComboBoxItem)PreviewSizeBox.SelectedItem).Content.ToString()!);
     private int ExportSize => int.Parse(((ComboBoxItem)ExportSizeBox.SelectedItem).Content.ToString()!);
 
+    // ---------- compression per map ----------
+
+    private static readonly (string Key, string Label)[] Maps =
+        { ("diffuse", "Diffuse"), ("normal", "Normal (_msn)"), ("specular", "Specular (_s)"), ("subsurface", "Subsurface (_sk)"), ("rfaos", "RFAOS"), ("shell", "Fur shell") };
+    private static readonly string[] FormatNames =
+        { "BC7 fast", "BC7 balanced", "BC7 best (slow)", "BC1 / DXT1 (small, drops alpha)", "BC3 / DXT5", "Uncompressed" };
+    private readonly Dictionary<string, ComboBox> _formatBoxes = new();
+    private ComboBox? _shellSizeBox;
+
+    private void BuildCompressionRows(State state)
+    {
+        void Row(string label, ComboBox box)
+        {
+            var r = CompressionGrid.RowDefinitions.Count;
+            CompressionGrid.RowDefinitions.Add(new RowDefinition { Height = GridLength.Auto });
+            var t = new TextBlock { Text = label, VerticalAlignment = VerticalAlignment.Center, Margin = new Thickness(0, 2, 8, 2) };
+            Grid.SetRow(t, r); Grid.SetRow(box, r); Grid.SetColumn(box, 1);
+            box.Margin = new Thickness(0, 2, 0, 2);
+            CompressionGrid.Children.Add(t); CompressionGrid.Children.Add(box);
+        }
+        foreach (var (key, label) in Maps)
+        {
+            var box = new ComboBox { ItemsSource = FormatNames };
+            box.SelectedIndex = (int)(state.Formats.TryGetValue(key, out var f) ? f : DdsFormat.Bc7Fast);
+            _formatBoxes[key] = box;
+            Row(label, box);
+        }
+        _shellSizeBox = new ComboBox { ItemsSource = new[] { "Same as its texture", "512", "1024", "2048", "4096" } };
+        _shellSizeBox.SelectedIndex = Math.Clamp(state.ShellSize, 0, 4);
+        _shellSizeBox.ToolTip = "Fur shells read the strand pattern softly, so a smaller shell texture often looks the same";
+        Row("Fur shell size", _shellSizeBox);
+    }
+
+    private DdsFormat FormatFor(string map) => _formatBoxes.TryGetValue(map, out var b) ? (DdsFormat)b.SelectedIndex : DdsFormat.Bc7Fast;
+
     /// <summary>The export size for a texture group: heads and hands/feet can have their own, otherwise the body's.</summary>
     private int ExportSizeFor(string group)
     {
@@ -609,6 +647,8 @@ public partial class MainWindow : Window
             await EnsureVeinNetworkAsync(snapshot);
             var images = new Dictionary<string, int>(_imageTextures, StringComparer.OrdinalIgnoreCase);
             var rfaos = RfaosBox.IsChecked == true;
+            var formats = Maps.ToDictionary(m => m.Key, m => FormatFor(m.Key));
+            var shellTarget = _shellSizeBox is { SelectedIndex: > 0 } sb ? int.Parse((string)sb.SelectedItem) : 0;
             var gamePaths = GamePathsBox.IsChecked == true;
             var written = new List<string>();
             foreach (var group in _groups)
@@ -620,7 +660,7 @@ public partial class MainWindow : Window
                     Preview.Renderer.Generate(snapshot, size, images, group);
                     return Preview.Renderer.Read(group);
                 });
-                Status($"Compressing {group} to BC7… (this takes a while at large sizes)");
+                Status($"Compressing {group}… (this takes a while at large sizes)");
                 // where each texture goes: next to each other by group name, or at the exact game paths the meshes use
                 var shapeTextures = _groupShapes.TryGetValue(group, out var gs) ? gs.TexturePaths : Array.Empty<string?>();
                 string Out(int slot, string suffix)
@@ -635,17 +675,19 @@ public partial class MainWindow : Window
                 {
                     var jobs = new List<Action>
                     {
-                        () => DdsExporter.WriteBc7(Out(0, ".dds"), textures.Albedo, size, size),
-                        () => DdsExporter.WriteBc7(Out(1, "_msn.dds"), textures.Normal, size, size),
-                        () => DdsExporter.WriteBc7(Out(7, "_s.dds"), textures.Specular, size, size),
-                        () => DdsExporter.WriteBc7(Out(2, "_sk.dds"), textures.Subsurface, size, size),
+                        () => DdsExporter.Write(Out(0, ".dds"), textures.Albedo, size, size, formats["diffuse"]),
+                        () => DdsExporter.Write(Out(1, "_msn.dds"), textures.Normal, size, size, formats["normal"]),
+                        () => DdsExporter.Write(Out(7, "_s.dds"), textures.Specular, size, size, formats["specular"]),
+                        () => DdsExporter.Write(Out(2, "_sk.dds"), textures.Subsurface, size, size, formats["subsurface"]),
                     };
-                    if (rfaos) jobs.Add(() => DdsExporter.WriteBc7(Out(-1, "_rfaos.dds"), textures.Rfaos, size, size));
+                    if (rfaos) jobs.Add(() => DdsExporter.Write(Out(-1, "_rfaos.dds"), textures.Rfaos, size, size, formats["rfaos"]));
                     // Bottled Shaders fur shells: matched by name next to the diffuse
                     if (textures.Shell != null && (snapshot.Fur.Enabled ? snapshot.Fur.ExportShells : snapshot.BodyHair.ExportShells))
                     {
                         var shell = FillUncovered(textures.Shell, textures.Albedo, size);
-                        jobs.Add(() => DdsExporter.WriteBc7(Out(-1, "_shell.dds"), shell, size, size));
+                        var shellSize = shellTarget > 0 ? Math.Min(shellTarget, size) : size;
+                        shell = DdsExporter.Downscale(shell, size, shellSize);
+                        jobs.Add(() => DdsExporter.Write(Out(-1, "_shell.dds"), shell, shellSize, shellSize, formats["shell"]));
                         jobs.Add(() => File.WriteAllText(Out(-1, "_shell.json"), snapshot.Fur.Enabled ? ShellJson(snapshot.Fur) : ShellJson(snapshot.BodyHair)));
                     }
                     Parallel.Invoke(jobs.ToArray());
@@ -805,6 +847,8 @@ public partial class MainWindow : Window
                 ZipOutput = Patcher.Options.Zip,
                 AutoUpdate = AutoUpdateBox.IsChecked == true,
                 HeadSize = HeadSizeBox.SelectedIndex,
+                Formats = _formatBoxes.ToDictionary(kv => kv.Key, kv => (DdsFormat)kv.Value.SelectedIndex),
+                ShellSize = _shellSizeBox?.SelectedIndex ?? 0,
                 LimbSize = LimbSizeBox.SelectedIndex,
             };
             File.WriteAllText(StateFile, JsonSerializer.Serialize(state, new JsonSerializerOptions { WriteIndented = true }));
