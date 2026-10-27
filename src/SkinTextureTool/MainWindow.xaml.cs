@@ -548,6 +548,8 @@ public partial class MainWindow : Window
 
     private readonly Dictionary<string, (DateTime Stamp, float[] Grey, int W, int H)> _hairMasks = new(StringComparer.OrdinalIgnoreCase);
     private bool _hairBuilding, _hairAgain;
+    private string? _atlasKey;
+    private const int HairAtlasSize = 1024;
 
     /// <summary>Grows the hair cards from the hair mesh settings and its masks, and shows them in the preview.</summary>
     private async Task RebuildHairAsync()
@@ -591,6 +593,13 @@ public partial class MainWindow : Window
                     continue;
                 }
                 var snapshot = s.Clone().HairMesh; var seed = s.Seed;
+                var atlasKey = $"{seed}|{snapshot.Curl:0.000}|{snapshot.Frizz:0.000}|{snapshot.HairsPerCard}";
+                if (atlasKey != _atlasKey)
+                {
+                    var atlas = await Task.Run(() => HairAtlas.Generate(HairAtlasSize, snapshot, seed));
+                    await Preview.Run(() => Preview.Renderer.SetHairAtlas(atlas, HairAtlasSize));
+                    _atlasKey = atlasKey;
+                }
                 var mesh = await Task.Run(() => HairMeshBuilder.Build(surfaces, snapshot, seed));
                 await Preview.Run(() => Preview.Renderer.SetHairMesh(mesh, snapshot.Color, snapshot.RootDarkening));
                 HairInfo.Text = $"Hair mesh: {mesh.CardCount:N0} cards, {mesh.TriangleCount:N0} triangles, {mesh.VertexCount:N0} vertices"

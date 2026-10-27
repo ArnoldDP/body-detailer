@@ -81,14 +81,17 @@ public static class HairMeshBuilder
         foreach (var (root, n) in roots)
         {
             var h = Hash(root);
-            var length = s.Length * (1 - s.LengthVariation * h.X);
+            var h2 = Hash(root * 3.7f + new Vector3(11.3f));
+            var stray = h2.X < s.Strays * 0.15f;
+            var length = s.Length * (1 - s.LengthVariation * h.X) * (stray ? 1.7f : 1f);
+            var twist = (h2.Y - 0.5f) * s.Twist * MathF.PI;
             var flow = Flow(root, n, s);
             var side = Vector3.Normalize(Vector3.Cross(n, flow));
             // strands spread a little around the flow
             var spread = (h.Y - 0.5f) * (0.3f + 0.9f * s.Curl);
             flow = Vector3.Normalize(flow * MathF.Cos(spread) + side * MathF.Sin(spread));
             side = Vector3.Normalize(Vector3.Cross(n, flow));
-            var lift = s.Lift * MathF.PI * 0.5f;
+            var lift = MathF.Min(s.Lift + (stray ? 0.35f : 0f), 1f) * MathF.PI * 0.5f;
 
             // clump: the strand is pulled toward the clump's centre strand
             var clump = ClumpCentre(root, n, clumpCell);
@@ -106,7 +109,9 @@ public static class HairMeshBuilder
                 var dir = flow * MathF.Cos(angle) + n * MathF.Sin(angle);
                 // curl: a wave from side to side along the strand
                 var wave = MathF.Sin(t * (4f + 6f * h.Z) + h.X * 6.28f) * s.Curl * 0.9f;
-                dir = Vector3.Normalize(dir + side * wave);
+                // frizz: random kinks
+                var kink = Hash(root + new Vector3(i * 1.7f)) - new Vector4(0.5f);
+                dir = Vector3.Normalize(dir + side * (wave + kink.X * s.Frizz * 0.8f) + n * (kink.Y * s.Frizz * 0.4f));
                 p += dir * step;
                 // clumping pulls the outer part of the strand toward the clump's centre strand (same offset from its root)
                 var pull = s.Clumping * t * t * 0.6f;
@@ -128,9 +133,12 @@ public static class HairMeshBuilder
             for (var i = 0; i <= segments; i++)
             {
                 var t = i / (float)segments;
-                var across = Vector3.Normalize(Vector3.Cross(n, dirs[i]));
+                // across the card: along the skin, turned about the strand by the card's twist
+                var flat = Vector3.Normalize(Vector3.Cross(n, dirs[i]));
+                var up = Vector3.Normalize(Vector3.Cross(dirs[i], flat));
+                var across = Vector3.Normalize(flat * MathF.Cos(twist) + up * MathF.Sin(twist));
                 var face = Vector3.Normalize(Vector3.Cross(dirs[i], across));
-                var half = s.Width * 0.5f * (1 - 0.6f * t);
+                var half = s.Width * 0.5f * (1 - 0.2f * t); // only a slight taper: the hairs on the texture spread to the tip
                 foreach (var sgn in new[] { -1f, 1f })
                 {
                     var q = points[i] + across * (half * sgn);

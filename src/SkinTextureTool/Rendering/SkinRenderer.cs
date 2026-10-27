@@ -49,6 +49,7 @@ internal sealed class SkinRenderer
 
     private GlProgram? _generate, _bake, _bleed, _preview, _composite, _shell, _shellBlend, _hair;
     private GpuShape? _hairMesh;
+    private int _hairAtlas;
     private Vector3 _hairColor; private float _hairRootDark;
     private readonly List<Group> _groups = new();
     private int _emptyVao;
@@ -158,16 +159,29 @@ internal sealed class SkinRenderer
         _hairMesh = new GpuShape(vao, buffers, mesh.Indices.Length);
     }
 
+    /// <summary>Uploads the hair-card texture (RGBA, row 0 at v = 0), mipmapped.</summary>
+    public void SetHairAtlas(byte[] rgba, int size)
+    {
+        if (_hairAtlas == 0) _hairAtlas = GL.GenTexture();
+        GL.BindTexture(TextureTarget.Texture2D, _hairAtlas);
+        GL.TexImage2D(TextureTarget.Texture2D, 0, PixelInternalFormat.Rgba8, size, size, 0, PixelFormat.Rgba, PixelType.UnsignedByte, rgba);
+        GL.GenerateMipmap(GenerateMipmapTarget.Texture2D);
+        GL.TexParameter(TextureTarget.Texture2D, TextureParameterName.TextureMinFilter, (int)TextureMinFilter.LinearMipmapLinear);
+        GL.TexParameter(TextureTarget.Texture2D, TextureParameterName.TextureMagFilter, (int)TextureMagFilter.Linear);
+        GL.TexParameter(TextureTarget.Texture2D, TextureParameterName.TextureWrapS, (int)TextureWrapMode.ClampToEdge);
+        GL.TexParameter(TextureTarget.Texture2D, TextureParameterName.TextureWrapT, (int)TextureWrapMode.ClampToEdge);
+    }
+
     private void DrawHair(Matrix4 mvp, Vector3 eye, Vector3 light)
     {
-        if (_hairMesh is not { } h || _hair == null) return;
+        if (_hairMesh is not { } h || _hair == null || _hairAtlas == 0) return;
         _hair.Use();
         _hair.Set("uMvp", mvp);
         _hair.Set("uEye", eye);
         _hair.Set("uLight", light);
         _hair.Set("uHairColor", _hairColor);
         _hair.Set("uRootDark", _hairRootDark);
-        _hair.Set("uColumns", HairMeshBuilder.AtlasColumns);
+        _hair.Texture("uAtlas", 0, _hairAtlas);
         GL.BindVertexArray(h.Vao);
         GL.DrawElements(PrimitiveType.Triangles, h.IndexCount, DrawElementsType.UnsignedInt, 0);
         GL.BindVertexArray(0);

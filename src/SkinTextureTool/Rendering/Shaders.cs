@@ -507,28 +507,17 @@ internal static class Shaders
         #version 330 core
         in vec2 vUv; in vec3 vNrm; in vec3 vTan; in vec3 vPos;
         out vec4 frag;
-        uniform vec3 uLight, uEye, uHairColor; uniform float uRootDark; uniform int uColumns;
-        float h1(float x) { return fract(sin(x * 127.1) * 43758.5453); }
+        uniform vec3 uLight, uEye, uHairColor; uniform float uRootDark;
+        // the hair-card texture: R shade, G along the hair (0 root, 1 tip), B sideways direction, A coverage
+        uniform sampler2D uAtlas;
         void main() {
-            // the atlas strip this card uses, and where across it this fragment is
-            float col = floor(vUv.x * float(uColumns));
-            float x = fract(vUv.x * float(uColumns));
-            float v = vUv.y;
-            // a few hairs per card, each its own place, length and slight drift, tapering to the tip
-            float a = 0.0;
-            for (int k = 0; k < 6; k++) {
-                float s = col * 17.0 + float(k);
-                float len = mix(0.6, 1.0, h1(s + 3.1));
-                if (v > len) continue;
-                float centre = (float(k) + 0.5 + (h1(s) - 0.5) * 0.7) / 6.0 + (h1(s + 7.7) - 0.5) * 0.15 * v;
-                float w = 0.05 * mix(1.0, 0.3, v / len);
-                a = max(a, 1.0 - smoothstep(w * 0.5, w, abs(x - centre)));
-            }
-            if (a < 0.4) discard;
+            vec4 tex = texture(uAtlas, vUv);
+            if (tex.a < 0.35) discard; // alpha tested, as the game draws hair
+            float v = tex.g;
             vec3 n = normalize(vNrm), t = normalize(vTan);
             vec3 l = uLight, e = normalize(uEye - vPos), hv = normalize(l + e);
             if (dot(n, e) < 0.0) n = -n; // cards are two sided
-            vec3 albedo = uHairColor * mix(1.0 - uRootDark, 1.0, smoothstep(0.0, 0.6, v));
+            vec3 albedo = uHairColor * (0.6 + 0.6 * tex.r) * mix(1.0 - uRootDark, 1.0, smoothstep(0.0, 0.6, v));
             float diffuse = 0.35 + 0.65 * max(dot(n, l) * 0.5 + 0.5, 0.0);
             // Kajiya-Kay highlight along the strand, from its middle to the tip
             float th = dot(t, hv);

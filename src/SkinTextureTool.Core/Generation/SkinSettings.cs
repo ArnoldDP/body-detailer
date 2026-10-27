@@ -162,20 +162,28 @@ public sealed class HairMeshLayer : Layer
     public HairMeshLayer() => Enabled = false;
     public Rgb Color { get; set; } = Rgb.FromHex("#2E221A");
     /// <summary>Cards per square body unit (about 2 cm²) where the mask is white.</summary>
-    [Range(0.5f, 40)] public float Density { get; set; } = 6f;
+    [Range(0.2f, 40)] public float Density { get; set; } = 2f;
     /// <summary>Strand length in body units (about 1.4 cm each).</summary>
     [Range(0.3f, 8)] public float Length { get; set; } = 2.5f;
     [Range(0, 1)] public float LengthVariation { get; set; } = 0.4f;
     /// <summary>Card width in body units: wider cards carry more hairs each, so fewer are needed.</summary>
-    [Range(0.05f, 1.5f)] public float Width { get; set; } = 0.3f;
+    [Range(0.05f, 2)] public float Width { get; set; } = 0.7f;
     /// <summary>Segments along each card: more bend smoothly but cost two triangles each.</summary>
-    [Range(1, 12)] public int Segments { get; set; } = 4;
+    [Range(1, 12)] public int Segments { get; set; } = 3;
     /// <summary>How far strands stand off the skin at the root: 0 flat, 1 straight out.</summary>
-    [Range(0, 1)] public float Lift { get; set; } = 0.3f;
+    [Range(0, 1)] public float Lift { get; set; } = 0.45f;
     /// <summary>How much strands lie back down toward the skin along their length.</summary>
     [Range(0, 1)] public float LieFlat { get; set; } = 0.6f;
     [Range(0, 1)] public float Curl { get; set; } = 0.5f;
     [Range(0, 1)] public float Clumping { get; set; } = 0.4f;
+    /// <summary>Random kinks along each hair.</summary>
+    [Range(0, 1)] public float Frizz { get; set; } = 0.3f;
+    /// <summary>How far cards turn about their length, so overlapping cards cross into a fluffy volume.</summary>
+    [Range(0, 1)] public float Twist { get; set; } = 0.6f;
+    /// <summary>Longer, more lifted stray cards scattered among the rest.</summary>
+    [Range(0, 1)] public float Strays { get; set; } = 0.3f;
+    /// <summary>Hairs drawn on each card's texture strip.</summary>
+    [Range(4, 60)] public int HairsPerCard { get; set; } = 28;
     /// <summary>Direction: down the body, leaning in towards the centre line (negative) or out (positive).</summary>
     [Range(-1, 1)] public float LeanInOut { get; set; } = 0f;
     /// <summary>Slow swirls in the flow, so it doesn't all run one way.</summary>
@@ -183,7 +191,7 @@ public sealed class HairMeshLayer : Layer
     /// <summary>Darker toward the roots.</summary>
     [Range(0, 1)] public float RootDarkening { get; set; } = 0.5f;
     /// <summary>The most triangles the hair may use; cards are left out at random beyond it.</summary>
-    [Range(1000, 200000)] public int MaxTriangles { get; set; } = 30000;
+    [Range(500, 200000)] public int MaxTriangles { get; set; } = 3000;
 }
 
 /// <summary>
