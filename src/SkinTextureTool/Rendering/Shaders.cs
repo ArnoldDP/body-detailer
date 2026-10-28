@@ -101,6 +101,7 @@ internal static class Shaders
         // fur: colour, pattern colour, belly colour; (enabled, colour strength, colour variation, density),
         // (strand length, spread, normal strength, light belly), (stripes, stripe scale, spots, spot scale)
         uniform vec3 uFurColor, uFurPatternColor, uFurBellyColor; uniform vec4 uFur, uFur2, uFur3;
+        uniform vec4 uFur4; // (clumping, waviness, -, -)
         uniform sampler2D mFur; uniform int hFur;
         // body hair: colour; (enabled, skin darkening, density, strand length), (curl, lean in/out, sparseness, -)
         uniform vec3 uHairColor; uniform vec4 uHair, uHair2;
@@ -216,26 +217,21 @@ internal static class Shaders
                 height += (v.z < 0.6 ? 1.0 : 0.0) * smoothstep(0.38, 0.0, v.x) * uGoose.x * 0.01 * detailFade(2.5 * uGoose.y);
             }
 
-            // fur: strands follow a flow over the surface (down the body, sweeping away from the spine), drawn as
-            // cells stretched along it, each with its own height (the shell texture's alpha)
+            // fur: a coat of real strands. The coat colour (with its stripes, spots and lighter belly) fills in as an
+            // undercoat, then layers of thin tapered strands lie over it along the fur's flow (down the body, sweeping
+            // out from the spine), in clumps that share a direction, deeper layers darker, tips catching the light.
+            // Strands are laid out in the texture's own space (a fixed grid, so no shearing as the flow turns), steered
+            // by the flow carried into that space through the UV derivatives, as body hair does.
             vec4 shell = vec4(0.0);
+            float furGloss = 0.0;
             if (uFur.x > 0.5) {
                 float cover = mask(mFur, hFur);
                 vec3 n = normalize(vNrm);
                 vec3 flow = vec3(0.0, 0.0, -1.0) + vec3(sign(vPos.x + 1e-4), 0.0, 0.0) * uFur2.y * 1.5;
                 flow = flow - n * dot(flow, n);
                 flow = length(flow) > 1e-3 ? normalize(flow) : normalize(cross(n, vec3(1, 0, 0)));
-                vec3 side = normalize(cross(n, flow));
-                // strands are as fine as the density asks, but never under about 2.5 texels at this resolution:
-                // finer than that can't be drawn, and the shells need real strands, not a blur
-                float strandFreq = min(12.0 * uFur.w, 1.0 / max(2.5 * uScale * uFootprint, 1e-6));
-                vec3 q = vec3(dot(vPos, flow) / uFur2.x, dot(vPos, side), dot(vPos, n)) * (strandFreq * uScale);
-                vec3 cell = voronoi(q + 151.0);
-                // a strand fills most of its cell, tapering at the edge, so the coat reads full rather than patchy
-                float core = smoothstep(1.15, 0.0, cell.x);
-                float strandHeight = pow(cell.z, 0.7) * core; // more strands reach the outer shells
-                float fade = 1.0;
-                // colour: fur over the skin, with stripes, spots, a lighter belly and per-strand variation
+
+                // the coat colour
                 vec3 fur = uFurColor * (1.0 + uFur.z * 0.35 * fbm(p * 0.06 + 157.0, 3));
                 if (uFur3.x > 0.0) {
                     float band = sin(vPos.z * 0.45 * uFur3.y + fbm(p * 0.04 * uFur3.y + 163.0, 3) * 3.0 + abs(vPos.x) * 0.12 * uFur3.y);
@@ -248,10 +244,69 @@ internal static class Shaders
                     float throat = smoothstep(0.2, 0.8, n.y) * smoothstep(104.0, 112.0, vPos.z);
                     fur = mix(fur, uFurBellyColor, uFur2.w * max(belly, throat));
                 }
-                fur *= mix(1.0, 0.82 + 0.25 * strandHeight, fade);
-                col = mix(col, fur, uFur.y * cover);
-                height -= (1.0 - core) * uFur2.z * 0.004 * cover * fade;
-                shell = vec4(clamp(fur, 0.0, 1.0), clamp(mix(0.5, strandHeight, fade) * cover, 0.0, 1.0));
+
+                // the flow in texture space
+                vec3 du = dFdx(vPos) / max(abs(dFdx(vUv.x)), 1e-7), dv = dFdy(vPos) / max(abs(dFdy(vUv.y)), 1e-7);
+                du *= sign(dFdx(vUv.x)); dv *= sign(dFdy(vUv.y));
+                float g11 = dot(du, du), g12 = dot(du, dv), g22 = dot(dv, dv), det = max(g11 * g22 - g12 * g12, 1e-9);
+                vec2 fb = vec2(dot(du, flow), dot(dv, flow));
+                vec2 fuv = vec2(g22 * fb.x - g12 * fb.y, g11 * fb.y - g12 * fb.x) / det;
+                float k = uFootprint / max(abs(dFdx(vUv.x)), 1e-7);
+                vec2 fdir = length(fuv) > 1e-9 ? normalize(fuv) : vec2(0.0, -1.0);
+                vec2 uv2 = vUv * k;
+
+                float width = max(0.016, 0.7 * uFootprint);
+                float thin = sqrt(min(1.0, 0.016 / width));
+                float len = 0.22 * uFur2.x;                      // strand length (body units)
+                float spacing = max(0.3, len / 5.0);             // a texel checks at most 11x11 roots per layer
+                int reach = min(int(ceil(len / spacing)), 5);
+                int layers = clamp(int(ceil(uFur.w * 5.0)), 2, 14); // density: more layers of strands
+
+                // undercoat: the coat colour, a little darker, so no skin shows through a full coat
+                col = mix(col, fur * 0.6, uFur.y * cover);
+                float cover2 = 0.0, ridge = 0.0, topH = 0.0;
+                for (int L = 0; L < 14; L++) {
+                    if (L >= layers) break;
+                    float depth = float(L) / float(max(layers - 1, 1));
+                    vec2 luv = uv2 + vec2(0.37, 0.61) * spacing * float(L) + vec2(0.13, 0.29) * spacing * float(L * L);
+                    vec2 cell = floor(luv / spacing);
+                    for (int dy = -5; dy <= 5; dy++)
+                    for (int dx = -5; dx <= 5; dx++) {
+                        if (abs(dx) > reach || abs(dy) > reach) continue;
+                        vec2 c = cell + vec2(float(dx), float(dy));
+                        vec3 h = randVec(ivec3(c, 307 + 10 * L));
+                        vec3 h2 = randVec(ivec3(c, 309 + 10 * L));
+                        // clumps: strands in a clump lean the same way and share a length
+                        vec3 cl = randVec(ivec3(floor(c / 3.0), 311));
+                        float ang = mix((h2.x - 0.5) * 0.5, (cl.x - 0.5) * 0.9, uFur4.x);
+                        vec2 d = vec2(fdir.x * cos(ang) - fdir.y * sin(ang), fdir.x * sin(ang) + fdir.y * cos(ang));
+                        vec2 perp = vec2(-d.y, d.x);
+                        vec2 root = (c + h.xy) * spacing;
+                        float l = len * mix(0.55 + 0.45 * h2.y, 0.7 + 0.3 * cl.y, uFur4.x);
+                        vec2 rel = luv - root;
+                        float t = dot(rel, d) / l;
+                        if (t < 0.0 || t > 1.0) continue;
+                        // a slight bend, and with waviness a gentle wave along the strand
+                        float bend = (h2.z - 0.5) * 0.3 * l;
+                        float wave = sin(t * (4.0 + 4.0 * h.z) + h2.x * 6.28) * 0.06 * l * uFur4.y;
+                        float off = dot(rel, perp) - (bend * t * t + wave * t);
+                        float w = width * mix(1.0, 0.3, t);       // tapering to a fine tip
+                        float a = (1.0 - smoothstep(w * 0.35, w, abs(off))) * thin * mix(0.55, 0.95, h.y)
+                                * smoothstep(1.0, 0.8, t) * smoothstep(0.0, 0.05, t);
+                        if (a <= 0.0) continue;
+                        // deeper layers darker, tips lighter; each strand's own shade
+                        float shade = mix(0.62, 1.12, depth) * mix(0.88, 1.2, t) * (1.0 + (h2.y - 0.5) * 0.4 * uFur.z);
+                        col = mix(col, fur * shade, a * uFur.y * cover);
+                        cover2 = 1.0 - (1.0 - cover2) * (1.0 - a);
+                        ridge = mix(ridge, sqrt(max(1.0 - abs(off) / w, 0.0)) * (0.5 + 0.5 * depth), a);
+                        furGloss = mix(furGloss, smoothstep(0.35, 0.65, t) * smoothstep(1.0, 0.85, t) * (0.5 + 0.5 * depth), a);
+                        // the shell grows from the top layers' strands, so it has gaps between tufts
+                        if (L >= layers - 3) topH = max(topH, smoothstep(0.08, 0.3, a) * mix(0.55, 1.0, h.z) * (1.0 - t * 0.3));
+                    }
+                }
+                furGloss *= cover;
+                height += (ridge * uFur2.z * 0.005 - (1.0 - cover2) * uFur2.z * 0.002) * cover;
+                shell = vec4(clamp(fur, 0.0, 1.0), clamp(topH * cover, 0.0, 1.0));
             }
 
             // body hair over the whole surface (regions and their masks confine it): individual curved strands. Roots
@@ -339,7 +394,7 @@ internal static class Shaders
             float spec = uMaterial.x * (1.0 - uMaterial.y * (0.5 + 0.5 * fbm(p * 0.2 + 131.0, 3)));
             if (hExSpec == 1) spec = mix(spec, texture(uExSpec, vUv).r, uExMix.y);
             spec *= 1.0 - poreAmount * 0.5;
-            spec = max(spec, hairGloss * 0.55);
+            spec = max(spec, max(hairGloss * 0.55, furGloss * 0.45));
 
             oAlbedo = vec4(clamp(col, 0.0, 1.0), 1.0);
             oHeight = vec4(height, 0.0, 0.0, 1.0);

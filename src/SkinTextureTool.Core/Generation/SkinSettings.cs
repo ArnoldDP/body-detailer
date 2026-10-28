@@ -244,6 +244,10 @@ public sealed class FurLayer : Layer
     [Range(1, 8)] public float StrandLength { get; set; } = 4f;
     /// <summary>Fur direction: 0 straight down the body, 1 sweeping out away from the spine.</summary>
     [Range(0, 1)] public float Spread { get; set; } = 0.35f;
+    /// <summary>How much neighbouring strands gather into tufts that lean the same way and share a length.</summary>
+    [Range(0, 1)] public float Clumping { get; set; } = 0.5f;
+    /// <summary>A gentle wave along each strand.</summary>
+    [Range(0, 1)] public float Waviness { get; set; } = 0.2f;
     /// <summary>Strand grooves in the normal map.</summary>
     [Range(0, 1)] public float NormalStrength { get; set; } = 0.4f;
     /// <summary>
