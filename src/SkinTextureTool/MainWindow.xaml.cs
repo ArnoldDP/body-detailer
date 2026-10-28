@@ -104,6 +104,7 @@ public partial class MainWindow : Window
         Settings.HairChanged += () => { _hairDebounce.Stop(); _hairDebounce.Start(); };
         Sliders.Changed += () => _geometryDebounce.Start();
         Closing += (_, _) => SaveState();
+        Genitals.Bake.Click += OnBakeGenitals;
         var saved = state.Nifs.Where(File.Exists).ToList();
         // a command-line export brings its own meshes, so the saved ones aren't reloaded
         if (saved.Count > 0) Loaded += async (_, _) => { if (!Headless) await AddNifsAsync(saved); };
@@ -254,6 +255,9 @@ public partial class MainWindow : Window
             }
             Status($"Loading {npc.Name}…");
             var session = _session;
+            var addons = await Task.Run(() => GenitalAddon.List(session));
+            Genitals.Addon.ItemsSource = addons.Select(a => new AddonChoice(a)).ToList();
+            if (addons.Count > 0) Genitals.Addon.SelectedIndex = 0;
             var (loaded, notes) = await Task.Run(() =>
             {
                 var pieces = SkinTextureTool.Core.Patcher.NpcAssets.Pieces(session, npc, out var n);
@@ -687,6 +691,139 @@ public partial class MainWindow : Window
             HairExportButton.IsEnabled = true;
         }
     }
+
+    // ---------- genital add-on patch ----------
+
+    private sealed record AddonChoice(Mutagen.Bethesda.Skyrim.IArmorGetter Armor)
+    {
+        public override string ToString() => $"{Armor.Name?.String ?? Armor.EditorID} ({Armor.FormKey.ModKey.FileName})";
+    }
+
+    /// <summary>A texture from the load order (a path under textures, with or without the prefix), or a file on disk.</summary>
+    private static RgbaImage? LoadImage(SkinTextureTool.Core.Patcher.GameSession session, string? dataPath)
+    {
+        if (string.IsNullOrEmpty(dataPath)) return null;
+        var rel = dataPath.StartsWith("textures", StringComparison.OrdinalIgnoreCase) ? dataPath : Path.Combine("textures", dataPath);
+        var file = File.Exists(dataPath) ? dataPath : session.Data.Materialize(rel);
+        if (file == null) return null;
+        var image = ImageFiles.Load(file);
+        return new RgbaImage(image.Width, image.Height, image.Rgba);
+    }
+
+    /// <summary>
+    /// Bakes the selected genital add-on's textures for the loaded NPC: the NPC's body textures projected onto the
+    /// add-on's layout and blended in by the mask, written as DDS under the export folder, and (if chosen) given to
+    /// the NPC through its patch plugin.
+    /// </summary>
+    private async void OnBakeGenitals(object? sender, RoutedEventArgs e)
+    {
+        if (_session is not { } session || _loadedNpc is not { } entry) { Genitals.Info.Text = "Load an NPC first (Load NPC)."; return; }
+        if (Genitals.Addon.SelectedItem is not AddonChoice choice) { Genitals.Info.Text = "No genital add-on (with TNG_AddonFemale and TNG_SkinWithPenis) was found in the load order."; return; }
+        var folder = ExportFolderBox.Text.Trim();
+        if (folder.Length == 0) { Genitals.Info.Text = "Choose an export folder first."; return; }
+        // the body: the loaded group with the most vertices, with the textures it uses
+        var body = _meshGroups.OrderByDescending(g => g.Shapes.Sum(s => s.Shape.VertexCount)).Select(g => g.Shapes.Select(s => s.Shape).ToList()).FirstOrDefault();
+        if (body == null) { Genitals.Info.Text = "The NPC's body isn't loaded."; return; }
+        var maskPath = Genitals.Mask.Text.Trim();
+        var distribute = Genitals.Distribute.IsChecked == true;
+        var formats = new[] { FormatFor("diffuse"), FormatFor("normal"), FormatFor("subsurface"), FormatFor("specular") };
+        Genitals.Bake.IsEnabled = false;
+        try
+        {
+            Genitals.Info.Text = "Baking…";
+            var npcKey = Mutagen.Bethesda.Plugins.FormKey.Factory(entry.FormKey);
+            var result = await Task.Run(() =>
+            {
+                var notes = new List<string>();
+                var npc = session.Cache.Resolve<Mutagen.Bethesda.Skyrim.INpcGetter>(npcKey);
+                var piece = GenitalAddon.For(session, choice.Armor, npc) ?? throw new InvalidOperationException($"{choice} has no piece for {entry.Race}.");
+                var meshFile = session.Data.Materialize(piece.MeshPath) ?? throw new FileNotFoundException($"{piece.MeshPath} isn't in the load order.");
+                var genital = Merge(BodyMesh.Load(meshFile));
+                RgbaImage? mask = null;
+                if (maskPath.Length > 0 && File.Exists(maskPath)) { var m = ImageFiles.Load(maskPath); mask = new RgbaImage(m.Width, m.Height, m.Rgba); }
+                else if (maskPath.Length > 0) notes.Add("The mask file wasn't found, so the body texture covers the whole add-on.");
+
+                // the add-on's own maps (from the texture set its piece swaps in, else the mesh's) and the body's
+                var tex = piece.Textures;
+                string? Own(int slot, string? fromSet) => fromSet ?? (slot < genital.TexturePaths.Length ? genital.TexturePaths[slot] : null);
+                var maps = new (string Suffix, string Label, string? Genital, int BodySlot)[]
+                {
+                    ("", "diffuse", Own(0, tex?.Diffuse?.DataRelativePath.Path), 0),
+                    ("_msn", "normal", Own(1, tex?.NormalOrGloss?.DataRelativePath.Path), 1),
+                    ("_sk", "subsurface", Own(2, tex?.GlowOrDetailMap?.DataRelativePath.Path), 2),
+                    ("_s", "specular", Own(7, tex?.BacklightMaskOrSpecular?.DataRelativePath.Path), 7),
+                };
+                var diffuse = LoadImage(session, maps[0].Genital) ?? throw new FileNotFoundException("The add-on's diffuse texture wasn't found.");
+                var size = diffuse.Width;
+                var projection = GenitalBaker.Project(genital, body, size, mask);
+                var name = HairExporter.Safe(npc.EditorID ?? entry.Name);
+                var relFolder = Path.Combine("Body Detailer Genitals", name);
+                var written = new List<string>(); byte[]? preview = null;
+                var paths = new string?[4];
+                for (var m = 0; m < maps.Length; m++)
+                {
+                    var own = m == 0 ? diffuse : LoadImage(session, maps[m].Genital);
+                    if (own == null) { notes.Add($"The add-on has no {maps[m].Label} map; skipped."); continue; }
+                    var bodyPath = body[0].TexturePaths.Length > maps[m].BodySlot ? body[0].TexturePaths[maps[m].BodySlot] : null;
+                    var bodyImage = LoadImage(session, bodyPath);
+                    if (bodyImage == null) notes.Add($"The body's {maps[m].Label} map wasn't found; the add-on's own is kept.");
+                    // every map at the diffuse's size, so the projection lines up
+                    var ownSized = own.Width == size ? own : Resize(own, size);
+                    var px = GenitalBaker.Combine(projection, ownSized, body.Select(_ => bodyImage).ToList(), mask);
+                    paths[m] = Path.Combine(relFolder, "schlong" + maps[m].Suffix + ".dds");
+                    DdsExporter.Write(Path.Combine(folder, "textures", paths[m]!), px, size, size, formats[m]);
+                    written.Add(Path.Combine("textures", paths[m]!));
+                    if (m == 0) preview = px;
+                }
+                if (distribute)
+                {
+                    string Keep(int m, string? original) => paths[m] ?? original ?? "";
+                    var (plugin, n) = piece.Write(session, npcKey, folder, (Keep(0, null), Keep(1, tex?.NormalOrGloss?.GivenPath), Keep(2, tex?.GlowOrDetailMap?.GivenPath), Keep(3, tex?.BacklightMaskOrSpecular?.GivenPath)));
+                    written.Add(plugin); notes.AddRange(n);
+                    notes.Add($"Enable {plugin} at the end of your load order.");
+                }
+                return (Written: written, Notes: notes, Preview: preview, Size: size, Mesh: piece.MeshPath);
+            });
+            if (result.Preview != null) Genitals.ShowPreview(result.Preview, result.Size);
+            Genitals.Info.Text = $"Baked {result.Mesh} for {entry.Name}. Wrote {string.Join(", ", result.Written)}. {string.Join(" ", result.Notes)}";
+        }
+        catch (Exception ex)
+        {
+            Genitals.Info.Text = "Couldn't bake: " + ex.Message;
+        }
+        finally
+        {
+            Genitals.Bake.IsEnabled = true;
+        }
+    }
+
+    /// <summary>A NIF's shapes as one (they share the add-on's texture layout).</summary>
+    private static ShapeData Merge(IReadOnlyList<ShapeData> shapes)
+    {
+        if (shapes.Count == 1) return shapes[0];
+        var pos = new List<float>(); var uv = new List<float>(); var idx = new List<uint>();
+        foreach (var s in shapes)
+        {
+            var b = (uint)(pos.Count / 3);
+            pos.AddRange(s.Positions); uv.AddRange(s.Uvs); idx.AddRange(s.Indices.Select(i => i + b));
+        }
+        var first = shapes[0];
+        return new ShapeData { Name = first.Name, NifPath = first.NifPath, Positions = pos.ToArray(), Uvs = uv.ToArray(), Indices = idx.ToArray(), DiffusePath = first.DiffusePath, TexturePaths = first.TexturePaths, ModelSpaceNormals = first.ModelSpaceNormals };
+    }
+
+    private static RgbaImage Resize(RgbaImage image, int size)
+    {
+        var px = new byte[size * size * 4];
+        for (var y = 0; y < size; y++)
+        for (var x = 0; x < size; x++)
+        {
+            var c = image.Sample((x + 0.5f) / size, (y + 0.5f) / size);
+            var o = (y * size + x) * 4;
+            px[o] = (byte)c.X; px[o + 1] = (byte)c.Y; px[o + 2] = (byte)c.Z; px[o + 3] = (byte)c.W;
+        }
+        return new RgbaImage(size, size, px);
+    }
+
 
     // ---------- anatomical veins ----------
 
