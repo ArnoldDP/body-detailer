@@ -185,6 +185,29 @@ public static class HairMeshBuilder
         };
     }
 
+    /// <summary>Hair meshes grown on different surfaces as one, each with how many surfaces it grew on (numbered after the previous ones').</summary>
+    public static HairMesh Combine(IReadOnlyList<(HairMesh Mesh, int Surfaces)> parts)
+    {
+        if (parts.Count == 1) return parts[0].Mesh;
+        var pos = new List<float>(); var nrm = new List<float>(); var tan = new List<float>(); var uv = new List<float>(); var idx = new List<uint>();
+        var rs = new List<int>(); var rv = new List<int>(); var rw = new List<float>(); var ro = new List<float>();
+        int surfaceBase = 0, cards = 0, dropped = 0;
+        foreach (var (m, count) in parts)
+        {
+            var vertexBase = (uint)(pos.Count / 3);
+            pos.AddRange(m.Positions); nrm.AddRange(m.Normals); tan.AddRange(m.Tangents); uv.AddRange(m.Uvs);
+            idx.AddRange(m.Indices.Select(i => i + vertexBase));
+            rs.AddRange(m.RootSurface.Select(x => x + surfaceBase)); rv.AddRange(m.RootVertices); rw.AddRange(m.RootWeights); ro.AddRange(m.RootOffsets);
+            surfaceBase += count; cards += m.CardCount; dropped += m.Dropped;
+        }
+        return new HairMesh
+        {
+            Positions = pos.ToArray(), Normals = nrm.ToArray(), Tangents = tan.ToArray(), Uvs = uv.ToArray(), Indices = idx.ToArray(),
+            RootSurface = rs.ToArray(), RootVertices = rv.ToArray(), RootWeights = rw.ToArray(), RootOffsets = ro.ToArray(),
+            CardCount = cards, Dropped = dropped,
+        };
+    }
+
     /// <summary>A triangle's frame: along its first edge, across it, and its face normal.</summary>
     public static (Vector3 X, Vector3 Y, Vector3 Z) Frame(Vector3 a, Vector3 b, Vector3 c)
     {

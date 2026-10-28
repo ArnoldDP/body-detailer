@@ -160,6 +160,8 @@ public sealed class BodyHairLayer : Layer
 public sealed class HairMeshLayer : Layer
 {
     public HairMeshLayer() => Enabled = false;
+    /// <summary>The region whose masks say where the hair grows (its strength scales the density); empty: the layer's own masks.</summary>
+    public string MaskRegion { get; set; } = "";
     public Rgb Color { get; set; } = Rgb.FromHex("#2E221A");
     /// <summary>Cards per square body unit (about 2 cm²) where the mask is white.</summary>
     [Range(0.2f, 40)] public float Density { get; set; } = 2f;
@@ -368,6 +370,8 @@ public sealed class SkinSettings
     public FurLayer Fur { get; set; } = new();
     public BodyHairLayer BodyHair { get; set; } = new();
     public HairMeshLayer HairMesh { get; set; } = new();
+    /// <summary>Hair around a genital add-on's base, on the add-on's mesh where its blend mask is white, with its own shape settings.</summary>
+    public HairMeshLayer AddonHair { get; set; } = new() { Length = 1.4f, Density = 4f, EdgeLength = 0.4f, MaxTriangles = 1500 };
     public MaterialLayer Material { get; set; } = new();
     public NormalLayer Normals { get; set; } = new();
 

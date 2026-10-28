@@ -36,6 +36,8 @@ public sealed class SettingsPanel : StackPanel
     private IReadOnlyList<string> _groups = Array.Empty<string>();
     /// <summary>Only this layer (by property name), or every layer but <see cref="Exclude"/> when null.</summary>
     public string? Only { get; set; }
+    /// <summary>Leave out mask pickers (a layer whose mask comes from elsewhere).</summary>
+    public bool NoMasks { get; set; }
     /// <summary>Layers left out (by property name), shown elsewhere.</summary>
     public HashSet<string> Exclude { get; } = new();
     /// <summary>The layers whose sections are open, kept when the panel is rebuilt.</summary>
@@ -87,10 +89,20 @@ public sealed class SettingsPanel : StackPanel
                     presets.Children.Add(button);
                 }
                 body.Children.Add(presets);
+                if (!NoMasks)
+                {
+                    // where it grows: a region's masks, or its own
+                    var regions = new ComboBox { Margin = new Thickness(0, 0, 0, 6) };
+                    regions.Items.Add("(its own masks, below)");
+                    foreach (var r in _settings.Regions) regions.Items.Add(r.Name);
+                    regions.SelectedItem = hairLayer.MaskRegion.Length > 0 && _settings.Regions.Any(r => r.Name == hairLayer.MaskRegion) ? hairLayer.MaskRegion : regions.Items[0];
+                    regions.SelectionChanged += (_, _) => { hairLayer.MaskRegion = regions.SelectedIndex <= 0 ? "" : (string)regions.SelectedItem; RaiseHair(); };
+                    body.Children.Add(Row("Mask region", regions, null));
+                }
             }
             foreach (var p in layer.GetType().GetProperties().Where(p => p.Name is not nameof(Layer.Enabled) and not nameof(Layer.MaskPaths) && p.CanWrite))
                 AddProperty(body, layer, p, prop.Name);
-            if (layer.GetType().GetCustomAttribute<MaskableAttribute>() != null)
+            if (layer.GetType().GetCustomAttribute<MaskableAttribute>() != null && !NoMasks)
                 AddPerGroupPickers(body, "Mask", layer.MaskPaths, hair ? RaiseHair : Raise);
             if (layer is NormalLayer normals)
                 AddPerGroupPickers(body, "Detail map", normals.DetailMaps, Raise);

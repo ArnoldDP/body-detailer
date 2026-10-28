@@ -491,6 +491,32 @@ internal static class Shaders
         }
         """;
 
+    /// <summary>A genital add-on in the preview: its diffuse lit by its model-space normal map, like the skin.</summary>
+    public const string AddonVertex = """
+        #version 330 core
+        layout(location=0) in vec3 aPos;
+        layout(location=1) in vec2 aUv;
+        uniform mat4 uMvp;
+        out vec2 vUv; out vec3 vPos;
+        void main() { vUv = aUv; vPos = aPos; gl_Position = uMvp * vec4(aPos, 1.0); }
+        """;
+
+    public const string AddonFragment = """
+        #version 330 core
+        in vec2 vUv; in vec3 vPos;
+        out vec4 frag;
+        uniform sampler2D uAlbedo, uNormal; uniform vec3 uLight, uEye;
+        void main() {
+            vec3 albedo = texture(uAlbedo, vUv).rgb;
+            vec4 msn = texture(uNormal, vUv);
+            vec3 n = normalize(msn.rgb.xzy * 2.0 - 1.0);
+            float ndl = dot(n, uLight);
+            vec3 hv = normalize(uLight + normalize(uEye - vPos));
+            float s = pow(max(dot(n, hv), 0.0), 40.0) * 0.2;
+            frag = vec4(albedo * (0.25 + 0.75 * max(ndl, 0.0)) + vec3(s), 1.0);
+        }
+        """;
+
     /// <summary>Hair cards in the preview: strands drawn across each card, alpha tested as the game does.</summary>
     public const string HairVertex = """
         #version 330 core

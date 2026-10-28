@@ -49,6 +49,9 @@ internal sealed class SkinRenderer
 
     private GlProgram? _generate, _bake, _bleed, _preview, _composite, _shell, _shellBlend, _hair;
     private GpuShape? _hairMesh;
+    private GlProgram? _addon;
+    private GpuShape? _addonMesh;
+    private int _addonAlbedo, _addonNormal;
     private int _hairAtlas;
     private Vector3 _hairColor; private float _hairRootDark;
     private readonly List<Group> _groups = new();
@@ -81,6 +84,7 @@ internal sealed class SkinRenderer
         _bleed = new GlProgram(Shaders.ScreenVertex, Shaders.Bleed);
         _preview = new GlProgram(Shaders.PreviewVertex, Shaders.PreviewFragment);
         _hair = new GlProgram(Shaders.HairVertex, Shaders.HairFragment);
+        _addon = new GlProgram(Shaders.AddonVertex, Shaders.AddonFragment);
         _composite = new GlProgram(Shaders.ScreenVertex, Shaders.Composite);
         _emptyVao = GL.GenVertexArray();
         _fbo = GL.GenFramebuffer();
@@ -157,6 +161,52 @@ internal sealed class SkinRenderer
         GL.BufferData(BufferTarget.ElementArrayBuffer, mesh.Indices.Length * sizeof(uint), mesh.Indices, BufferUsageHint.StaticDraw);
         GL.BindVertexArray(0);
         _hairMesh = new GpuShape(vao, buffers, mesh.Indices.Length);
+    }
+
+    /// <summary>Uploads a genital add-on to draw with the body (null removes it): its mesh, diffuse and model-space normal map.</summary>
+    public void SetAddon(ShapeData? shape, RgbaImage? diffuse, RgbaImage? normal)
+    {
+        if (_addonMesh is { } old) { GL.DeleteVertexArray(old.Vao); GL.DeleteBuffers(old.Buffers.Length, old.Buffers); _addonMesh = null; }
+        if (shape == null) return;
+        var vao = GL.GenVertexArray();
+        GL.BindVertexArray(vao);
+        var buffers = new int[3];
+        GL.GenBuffers(3, buffers);
+        Attribute(buffers[0], 0, 3, shape.Positions);
+        Attribute(buffers[1], 1, 2, shape.Uvs);
+        GL.BindBuffer(BufferTarget.ElementArrayBuffer, buffers[2]);
+        GL.BufferData(BufferTarget.ElementArrayBuffer, shape.Indices.Length * sizeof(uint), shape.Indices, BufferUsageHint.StaticDraw);
+        GL.BindVertexArray(0);
+        _addonMesh = new GpuShape(vao, buffers, shape.Indices.Length);
+        _addonAlbedo = Upload(_addonAlbedo, diffuse, new byte[] { 200, 160, 150, 255 });
+        _addonNormal = Upload(_addonNormal, normal, new byte[] { 128, 128, 255, 255 });
+    }
+
+    /// <summary>An RGBA image as a mipmapped texture (one texel of <paramref name="fallback"/> without one).</summary>
+    private static int Upload(int texture, RgbaImage? image, byte[] fallback)
+    {
+        if (texture == 0) texture = GL.GenTexture();
+        GL.BindTexture(TextureTarget.Texture2D, texture);
+        if (image != null) GL.TexImage2D(TextureTarget.Texture2D, 0, PixelInternalFormat.Rgba8, image.Width, image.Height, 0, PixelFormat.Rgba, PixelType.UnsignedByte, image.Pixels);
+        else GL.TexImage2D(TextureTarget.Texture2D, 0, PixelInternalFormat.Rgba8, 1, 1, 0, PixelFormat.Rgba, PixelType.UnsignedByte, fallback);
+        GL.GenerateMipmap(GenerateMipmapTarget.Texture2D);
+        GL.TexParameter(TextureTarget.Texture2D, TextureParameterName.TextureMinFilter, (int)TextureMinFilter.LinearMipmapLinear);
+        GL.TexParameter(TextureTarget.Texture2D, TextureParameterName.TextureMagFilter, (int)TextureMagFilter.Linear);
+        return texture;
+    }
+
+    private void DrawAddon(Matrix4 mvp, Vector3 eye, Vector3 light)
+    {
+        if (_addonMesh is not { } m || _addon == null) return;
+        _addon.Use();
+        _addon.Set("uMvp", mvp);
+        _addon.Set("uEye", eye);
+        _addon.Set("uLight", light);
+        _addon.Texture("uAlbedo", 0, _addonAlbedo);
+        _addon.Texture("uNormal", 1, _addonNormal);
+        GL.BindVertexArray(m.Vao);
+        GL.DrawElements(PrimitiveType.Triangles, m.IndexCount, DrawElementsType.UnsignedInt, 0);
+        GL.BindVertexArray(0);
     }
 
     /// <summary>Uploads the hair-card texture (RGBA, row 0 at v = 0), mipmapped.</summary>
@@ -571,6 +621,7 @@ internal sealed class SkinRenderer
             _preview.Set("uHasPaint", paint != 0 ? 1 : 0);
             DrawShapes(g);
         }
+        if (mode is 0 or 1) DrawAddon(mvp, eye, light);
         if (mode == 0) DrawHair(mvp, eye, light);
         _preview.Use();
         if (!shells || _fur.Count == 0) return;

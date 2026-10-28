@@ -81,9 +81,13 @@ public partial class MainWindow : Window
 
         var state = LoadState();
         Settings.Exclude.Add(nameof(SkinSettings.HairMesh));
+        Settings.Exclude.Add(nameof(SkinSettings.AddonHair));
         HairSettings.Only = nameof(SkinSettings.HairMesh);
+        AddonHairSettings.Only = nameof(SkinSettings.AddonHair);
+        AddonHairSettings.NoMasks = true;
         Settings.Settings = state.Settings;
         HairSettings.Settings = state.Settings;
+        AddonHairSettings.Settings = state.Settings;
         Sliders.Settings = state.Settings;
         Regions.Settings = state.Settings;
         Regions.Changed += () => _debounce.Start();
@@ -105,11 +109,17 @@ public partial class MainWindow : Window
         Settings.Changed += () => _debounce.Start();
         Settings.GeometryChanged += () => _geometryDebounce.Start();
         HairSettings.HairChanged += () => { _hairDebounce.Stop(); _hairDebounce.Start(); };
+        AddonHairSettings.HairChanged += () => { _hairDebounce.Stop(); _hairDebounce.Start(); };
+        // regions (their masks, strengths and names) can be where the hair grows
+        Regions.Changed += () => { _hairDebounce.Stop(); _hairDebounce.Start(); HairSettings.Settings = Settings.Settings; };
         Sliders.Changed += () => _geometryDebounce.Start();
         Closing += (_, _) => SaveState();
         Genitals.Bake.Click += OnBakeGenitals;
-        Genitals.Addon.SelectionChanged += (_, _) => { if (HairOnAddonBox.IsChecked == true) _hairDebounce.Start(); };
-        Genitals.Mask.TextChanged += (_, _) => { if (HairOnAddonBox.IsChecked == true) _hairDebounce.Start(); };
+        Genitals.Addon.SelectionChanged += (_, _) => _ = ShowAddonAsync();
+        Genitals.ShowInPreview.Checked += (_, _) => _ = ShowAddonAsync();
+        Genitals.ShowInPreview.Unchecked += (_, _) => _ = ShowAddonAsync();
+        Genitals.Addon.SelectionChanged += (_, _) => { if (Settings.Settings.AddonHair.Enabled) _hairDebounce.Start(); };
+        Genitals.Mask.TextChanged += (_, _) => { if (Settings.Settings.AddonHair.Enabled) _hairDebounce.Start(); };
         var saved = state.Nifs.Where(File.Exists).ToList();
         // a command-line export brings its own meshes, so the saved ones aren't reloaded
         if (saved.Count > 0) Loaded += async (_, _) => { if (!Headless) await AddNifsAsync(saved); };
@@ -590,7 +600,6 @@ public partial class MainWindow : Window
     private string? _hairAddon;
     private readonly Dictionary<string, ShapeData> _addonMeshes = new(StringComparer.OrdinalIgnoreCase);
 
-    private void OnHairOnAddonChanged(object sender, RoutedEventArgs e) { if (IsLoaded) _hairDebounce.Start(); }
 
     /// <summary>The selected genital add-on's mesh for the loaded NPC, with the blend mask as where hair grows (all of it without one).</summary>
     private async Task<(HairMeshBuilder.Surface Surface, string MeshPath)?> AddonSurfaceAsync()
@@ -636,57 +645,77 @@ public partial class MainWindow : Window
             {
                 _hairAgain = false;
                 var s = Settings.Settings;
-                var layer = s.HairMesh;
-                if (!layer.Enabled || _meshGroups.Count == 0)
+                var main = s.HairMesh; var around = s.AddonHair;
+                if (!main.Enabled && !around.Enabled || _meshGroups.Count == 0)
                 {
-                    await Preview.Run(() => Preview.Renderer.SetHairMesh(null, layer.Color, 0));
+                    await Preview.Run(() => Preview.Renderer.SetHairMesh(null, main.Color, 0));
                     HairInfo.Text = "";
                     Preview.Refresh();
                     continue;
                 }
-                var surfaces = new List<HairMeshBuilder.Surface>();
-                foreach (var (group, shapes) in _meshGroups)
+                var notes = new List<string>();
+
+                // the main hair: on the loaded meshes, where its region's masks (or its own) are white
+                var bodySurfaces = new List<HairMeshBuilder.Surface>();
+                if (main.Enabled)
                 {
-                    var path = layer.MaskFor(group);
-                    if (path == null || !File.Exists(path)) continue;
-                    var stamp = File.GetLastWriteTimeUtc(path);
-                    if (!_hairMasks.TryGetValue(path, out var m) || m.Stamp != stamp)
+                    var region = main.MaskRegion.Length > 0 ? s.Regions.FirstOrDefault(r => r.Name == main.MaskRegion) : null;
+                    if (main.MaskRegion.Length > 0 && region == null) notes.Add($"no region named {main.MaskRegion}");
+                    foreach (var (group, shapes) in _meshGroups)
                     {
-                        var image = await Task.Run(() => ImageFiles.Load(path));
-                        var grey = new float[image.Width * image.Height];
-                        for (var i = 0; i < grey.Length; i++) grey[i] = image.Rgba[i * 4] / 255f;
-                        _hairMasks[path] = m = (stamp, grey, image.Width, image.Height);
+                        var path = main.MaskRegion.Length > 0 ? region?.MaskFor(group) : main.MaskFor(group);
+                        if (path == null || !File.Exists(path)) continue;
+                        var m = await HairMaskAsync(path);
+                        var grey = m.Grey;
+                        if (region != null && region.Strength < 1) grey = grey.Select(g => g * region.Strength).ToArray();
+                        bodySurfaces.AddRange(shapes.Select(x => new HairMeshBuilder.Surface(x.Shape, grey, m.W, m.H)));
                     }
-                    surfaces.AddRange(shapes.Select(x => new HairMeshBuilder.Surface(x.Shape, m.Grey, m.W, m.H)));
+                    if (bodySurfaces.Count == 0) notes.Add(main.MaskRegion.Length > 0 ? $"region {main.MaskRegion} has no masks" : "choose a mask region (or masks) for it");
                 }
+
+                // the hair around the add-on's base: its own settings, on the add-on's mesh where its blend mask is white
                 _hairAddon = null;
-                if (HairOnAddonBox.IsChecked == true)
+                HairMeshBuilder.Surface? addonSurface = null;
+                if (around.Enabled)
                 {
                     var extra = await AddonSurfaceAsync();
-                    if (extra == null) HairInfo.Text = "Hair mesh: load an NPC and pick the add-on in the Genitals tab to grow hair on it";
-                    else { surfaces.Add(extra.Value.Surface); _hairAddon = extra.Value.MeshPath; }
+                    if (extra == null) notes.Add("load an NPC and pick its add-on to grow hair around it");
+                    else { addonSurface = extra.Value.Surface; _hairAddon = extra.Value.MeshPath; }
                 }
-                if (surfaces.Count == 0)
+                if (bodySurfaces.Count == 0 && addonSurface == null)
                 {
-                    await Preview.Run(() => Preview.Renderer.SetHairMesh(null, layer.Color, 0));
-                    HairInfo.Text = "Hair mesh: choose a mask for the group(s) it should grow on";
+                    await Preview.Run(() => Preview.Renderer.SetHairMesh(null, main.Color, 0));
+                    HairInfo.Text = "Hair mesh: " + string.Join("; ", notes);
                     Preview.Refresh();
                     continue;
                 }
-                var snapshot = s.Clone().HairMesh; var seed = s.Seed;
-                var atlasKey = $"{seed}|{snapshot.Curl:0.000}|{snapshot.Frizz:0.000}|{snapshot.HairsPerCard}|{snapshot.HairThickness:0.000}|{snapshot.ColorVariation:0.000}|{snapshot.RootFade:0.000}";
+
+                // one hair texture for both (the main layer's look, or the add-on hair's when it's alone)
+                var clone = s.Clone();
+                var look = main.Enabled && bodySurfaces.Count > 0 ? clone.HairMesh : clone.AddonHair;
+                var seed = s.Seed;
+                var atlasKey = $"{seed}|{look.Curl:0.000}|{look.Frizz:0.000}|{look.HairsPerCard}|{look.HairThickness:0.000}|{look.ColorVariation:0.000}|{look.RootFade:0.000}";
                 if (atlasKey != _atlasKey)
                 {
-                    var atlas = await Task.Run(() => HairAtlas.Generate(HairAtlasSize, snapshot, seed));
+                    var atlas = await Task.Run(() => HairAtlas.Generate(HairAtlasSize, look, seed));
                     _hairAtlasPixels = atlas;
                     await Preview.Run(() => Preview.Renderer.SetHairAtlas(atlas, HairAtlasSize));
                     _atlasKey = atlasKey;
                 }
-                var mesh = await Task.Run(() => HairMeshBuilder.Build(surfaces, snapshot, seed));
-                await Preview.Run(() => Preview.Renderer.SetHairMesh(mesh, snapshot.Color, snapshot.RootDarkening));
-                _hairBuilt = (mesh, surfaces.Select(x => x.Shape).ToList(), snapshot, _hairAtlasPixels!);
+                var (mesh, surfaces) = await Task.Run(() =>
+                {
+                    var parts = new List<(HairMesh Mesh, int Surfaces)>();
+                    if (bodySurfaces.Count > 0) parts.Add((HairMeshBuilder.Build(bodySurfaces, clone.HairMesh, seed), bodySurfaces.Count));
+                    if (addonSurface is { } a) parts.Add((HairMeshBuilder.Build(new[] { a }, clone.AddonHair, seed + 1), 1));
+                    var all = bodySurfaces.Select(x => x.Shape).ToList();
+                    if (addonSurface is { } b) all.Add(b.Shape);
+                    return (HairMeshBuilder.Combine(parts), all);
+                });
+                await Preview.Run(() => Preview.Renderer.SetHairMesh(mesh, look.Color, look.RootDarkening));
+                _hairBuilt = (mesh, surfaces, look, _hairAtlasPixels!);
                 HairInfo.Text = $"Hair mesh: {mesh.CardCount:N0} cards, {mesh.TriangleCount:N0} triangles, {mesh.VertexCount:N0} vertices"
-                                + (mesh.Dropped > 0 ? $" ({mesh.Dropped:N0} cards over the budget left out)" : "");
+                                + (mesh.Dropped > 0 ? $" ({mesh.Dropped:N0} cards over the budget left out)" : "")
+                                + (notes.Count > 0 ? " — " + string.Join("; ", notes) : "");
                 Preview.Refresh();
             } while (_hairAgain);
         }
@@ -698,6 +727,17 @@ public partial class MainWindow : Window
         {
             _hairBuilding = false;
         }
+    }
+
+    /// <summary>A mask image as greys, cached until the file changes.</summary>
+    private async Task<(DateTime Stamp, float[] Grey, int W, int H)> HairMaskAsync(string path)
+    {
+        var stamp = File.GetLastWriteTimeUtc(path);
+        if (_hairMasks.TryGetValue(path, out var m) && m.Stamp == stamp) return m;
+        var image = await Task.Run(() => ImageFiles.Load(path));
+        var grey = new float[image.Width * image.Height];
+        for (var i = 0; i < grey.Length; i++) grey[i] = image.Rgba[i * 4] / 255f;
+        return _hairMasks[path] = (stamp, grey, image.Width, image.Height);
     }
 
     private async void OnExportHair(object sender, RoutedEventArgs e)
@@ -813,6 +853,7 @@ public partial class MainWindow : Window
                 var name = HairExporter.Safe(npc.EditorID ?? entry.Name);
                 var relFolder = Path.Combine("Body Detailer Genitals", name);
                 var written = new List<string>(); byte[]? preview = null;
+                var bakedMaps = new RgbaImage?[2];
                 var paths = new string?[4];
                 for (var m = 0; m < maps.Length; m++)
                 {
@@ -828,6 +869,7 @@ public partial class MainWindow : Window
                     DdsExporter.Write(Path.Combine(folder, "textures", paths[m]!), px, size, size, formats[m]);
                     written.Add(Path.Combine("textures", paths[m]!));
                     if (m == 0) preview = px;
+                    if (m <= 1) bakedMaps[m] = new RgbaImage(size, size, px);
                 }
                 if (distribute)
                 {
@@ -836,9 +878,10 @@ public partial class MainWindow : Window
                     written.Add(plugin); notes.AddRange(n);
                     notes.Add($"Enable {plugin} at the end of your load order.");
                 }
-                return (Written: written, Notes: notes, Preview: preview, Size: size, Mesh: piece.MeshPath);
+                return (Written: written, Notes: notes, Preview: preview, Size: size, Mesh: piece.MeshPath, Maps: bakedMaps);
             });
             if (result.Preview != null) Genitals.ShowPreview(result.Preview, result.Size);
+            if (result.Maps[0] is { } bakedDiffuse) { _bakedAddon = (entry.FormKey, bakedDiffuse, result.Maps[1]); _ = ShowAddonAsync(); }
             Genitals.Info.Text = $"Baked {result.Mesh} for {entry.Name}. Wrote {string.Join(", ", result.Written)}. {string.Join(" ", result.Notes)}";
         }
         catch (Exception ex)
@@ -848,6 +891,39 @@ public partial class MainWindow : Window
         finally
         {
             Genitals.Bake.IsEnabled = true;
+        }
+    }
+
+    /// <summary>The baked add-on maps for the loaded NPC (diffuse, normal), shown in the preview after a bake.</summary>
+    private (string Npc, RgbaImage Diffuse, RgbaImage? Normal)? _bakedAddon;
+
+    /// <summary>Draws the selected add-on's mesh for the loaded NPC in the preview, with the baked maps if there are any, else its own.</summary>
+    private async Task ShowAddonAsync()
+    {
+        try
+        {
+            if (Genitals.ShowInPreview.IsChecked != true || _session is not { } session || _loadedNpc is not { } entry || Genitals.Addon.SelectedItem is not AddonChoice choice)
+            {
+                await Preview.Run(() => Preview.Renderer.SetAddon(null, null, null));
+                Preview.Refresh();
+                return;
+            }
+            var baked = _bakedAddon is { } b && b.Npc == entry.FormKey ? b : ((string, RgbaImage, RgbaImage?)?)null;
+            var loaded = await Task.Run(() =>
+            {
+                var npc = session.Cache.Resolve<Mutagen.Bethesda.Skyrim.INpcGetter>(Mutagen.Bethesda.Plugins.FormKey.Factory(entry.FormKey));
+                if (GenitalAddon.For(session, choice.Armor, npc) is not { } piece || session.Data.Materialize(piece.MeshPath) is not { } file) return null;
+                if (!_addonMeshes.TryGetValue(piece.MeshPath, out var shape)) lock (_addonMeshes) _addonMeshes[piece.MeshPath] = shape = Merge(BodyMesh.Load(file));
+                var diffuse = baked?.Item2 ?? LoadImage(session, piece.Textures?.Diffuse?.DataRelativePath.Path ?? (shape.TexturePaths.Length > 0 ? shape.TexturePaths[0] : null));
+                var normal = baked != null ? baked.Value.Item3 : LoadImage(session, piece.Textures?.NormalOrGloss?.DataRelativePath.Path ?? (shape.TexturePaths.Length > 1 ? shape.TexturePaths[1] : null));
+                return ((ShapeData Shape, RgbaImage? Diffuse, RgbaImage? Normal)?)(shape, diffuse, normal);
+            });
+            await Preview.Run(() => Preview.Renderer.SetAddon(loaded?.Shape, loaded?.Diffuse, loaded?.Normal));
+            Preview.Refresh();
+        }
+        catch (Exception ex)
+        {
+            Status("Couldn't show the add-on: " + ex.Message);
         }
     }
 
@@ -1140,6 +1216,7 @@ public partial class MainWindow : Window
     {
         Settings.Settings = settings;
         HairSettings.Settings = settings;
+        AddonHairSettings.Settings = settings;
         Sliders.Settings = settings;
         Regions.Settings = settings;
         Painter.Settings = settings;

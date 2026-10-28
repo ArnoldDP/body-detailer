@@ -171,7 +171,10 @@ public sealed class RegionPanel : DockPanel
         _editor.Children.Add(copy);
 
         _editor.Children.Add(new TextBlock { Text = "Region skin settings", FontWeight = FontWeights.SemiBold, Margin = new Thickness(0, 4, 0, 4) });
-        var panel = new SettingsPanel { Settings = region.Settings, Groups = _groups };
+        var panel = new SettingsPanel { Groups = _groups };
+        panel.Exclude.Add(nameof(SkinSettings.HairMesh));
+        panel.Exclude.Add(nameof(SkinSettings.AddonHair));
+        panel.Settings = region.Settings;
         panel.Changed += () => Changed?.Invoke();
         _editor.Children.Add(panel);
     }
