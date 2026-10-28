@@ -121,13 +121,32 @@ public static class Builder
         return written;
     }
 
-    /// <summary>The BODYTRI string on the root node, replacing any there was (the .tri path under meshes).</summary>
+    /// <summary>
+    /// The one BODYTRI link, where BodySlide puts it for Skyrim: on the first shape with vertices (the game drops a
+    /// skinned armor mesh's root node when it attaches the shapes, so a link there never reaches RaceMenu), with
+    /// every shape marked dynamic so its vertices can be moved.
+    /// </summary>
     private static void SetBodyTri(NifFile nif, string triRel)
     {
-        var root = nif.GetRootNode();
-        var existing = nif.StringExtraDataChildren(root, true).FirstOrDefault(e => e.name.get() == "BODYTRI");
-        if (existing != null) nif.GetHeader().DeleteBlock(nif.GetHeader().GetBlockID(existing));
-        nif.AddStringExtraDataToNode((int)nif.GetHeader().GetBlockID(nif.GetRootNode()), "BODYTRI", triRel);
+        var header = nif.GetHeader();
+        for (var i = (int)header.GetNumBlocks() - 1; i >= 0; i--)
+            if (header.GetBlockTypeStringById((uint)i) == "NiStringExtraData" && Cast<NiStringExtraData>(header.GetBlockById((uint)i)).name.get() == "BODYTRI")
+                header.DeleteBlock((uint)i);
+        var shapes = nif.GetShapes().ToList();
+        var target = shapes.FirstOrDefault(s => nif.GetVertsForShape(s).Count > 0);
+        if (target == null) return;
+        var link = new NiStringExtraData { name = new NiStringRef("BODYTRI"), stringData = new NiStringRef(triRel) };
+        nif.AssignExtraData(target, link);
+        GC.SuppressFinalize(link); // the NIF owns it now; the wrapper mustn't free it too
+        foreach (var shape in shapes) nif.SetShapeDynamic(shape.name.get());
+    }
+
+    /// <summary>nifly hands blocks back as their base type; this views the same native object as <typeparamref name="T"/>.</summary>
+    private static T Cast<T>(object block)
+    {
+        const System.Reflection.BindingFlags any = System.Reflection.BindingFlags.Static | System.Reflection.BindingFlags.Instance | System.Reflection.BindingFlags.Public | System.Reflection.BindingFlags.NonPublic;
+        var handle = (System.Runtime.InteropServices.HandleRef)typeof(NiObject).GetMethod("getCPtr", any, new[] { typeof(NiObject) })!.Invoke(null, new[] { block })!;
+        return (T)typeof(T).GetConstructor(any, new[] { typeof(IntPtr), typeof(bool) })!.Invoke(new object[] { handle.Handle, false });
     }
 
     /// <summary>BodySlide's morph .tri ("PIRT"): per shape, every vertex-moving slider's full offsets as int16 scaled by the largest.</summary>
