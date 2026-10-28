@@ -176,6 +176,14 @@ public sealed class HairMeshLayer : Layer
     [Range(0, 1)] public float LieFlat { get; set; } = 0.6f;
     [Range(0, 1)] public float Curl { get; set; } = 0.5f;
     [Range(0, 1)] public float Clumping { get; set; } = 0.4f;
+    /// <summary>How long hairs are at the patch's edge, as a share of their length in its centre.</summary>
+    [Range(0.1f, 1)] public float EdgeLength { get; set; } = 0.5f;
+    /// <summary>How much flatter hairs lie at the patch's edge than in its centre.</summary>
+    [Range(0, 1)] public float EdgeFlatten { get; set; } = 0.5f;
+    /// <summary>How much each hair's colour varies.</summary>
+    [Range(0, 1)] public float ColorVariation { get; set; } = 0.2f;
+    /// <summary>How softly hairs fade in at the root, so they grow out of the skin instead of starting with a dot.</summary>
+    [Range(0, 1)] public float RootFade { get; set; } = 0.6f;
     /// <summary>Random kinks along each hair.</summary>
     [Range(0, 1)] public float Frizz { get; set; } = 0.3f;
     /// <summary>How far cards turn about their length, so overlapping cards cross into a fluffy volume.</summary>
@@ -194,6 +202,25 @@ public sealed class HairMeshLayer : Layer
     [Range(0, 1)] public float RootDarkening { get; set; } = 0.5f;
     /// <summary>The most triangles the hair may use; cards are left out at random beyond it.</summary>
     [Range(500, 200000)] public int MaxTriangles { get; set; } = 3000;
+
+    /// <summary>
+    /// Starting points after the presets of TAU's procedural pubic hair (Blender), translated to hair cards: each sets
+    /// the shape settings and leaves colour, density, triangle budget and masks alone.
+    /// </summary>
+    public static readonly IReadOnlyDictionary<string, Action<HairMeshLayer>> Presets = new Dictionary<string, Action<HairMeshLayer>>
+    {
+        ["Bushy"] = h => h.Shape(length: 2.9f, variation: 0.5f, lift: 0.55f, lieFlat: 0.45f, curl: 0.7f, clumping: 0.35f, frizz: 0.6f, twist: 0.7f, strays: 0.65f, edgeLength: 0.4f, edgeFlatten: 0.5f),
+        ["Curly"] = h => h.Shape(length: 1.4f, variation: 0.35f, lift: 0.45f, lieFlat: 0.7f, curl: 0.95f, clumping: 0.45f, frizz: 0.35f, twist: 0.6f, strays: 0.35f, edgeLength: 0.4f, edgeFlatten: 0.6f),
+        ["Spiky"] = h => h.Shape(length: 2.1f, variation: 0.3f, lift: 0.75f, lieFlat: 0.25f, curl: 1f, clumping: 0.6f, frizz: 0.3f, twist: 0.8f, strays: 1f, edgeLength: 0.45f, edgeFlatten: 0.3f),
+        ["Straight"] = h => h.Shape(length: 0.9f, variation: 0.4f, lift: 0.5f, lieFlat: 0.35f, curl: 0.3f, clumping: 0.3f, frizz: 0.15f, twist: 0.5f, strays: 0.65f, edgeLength: 0.5f, edgeFlatten: 0.4f),
+        ["Stubble"] = h => h.Shape(length: 0.35f, variation: 0.25f, lift: 0.85f, lieFlat: 0f, curl: 0.1f, clumping: 0f, frizz: 0.05f, twist: 0.3f, strays: 0f, edgeLength: 0.8f, edgeFlatten: 0f),
+    };
+
+    private void Shape(float length, float variation, float lift, float lieFlat, float curl, float clumping, float frizz, float twist, float strays, float edgeLength, float edgeFlatten)
+    {
+        Length = length; LengthVariation = variation; Lift = lift; LieFlat = lieFlat; Curl = curl; Clumping = clumping;
+        Frizz = frizz; Twist = twist; Strays = strays; EdgeLength = edgeLength; EdgeFlatten = edgeFlatten;
+    }
 }
 
 /// <summary>

@@ -46,12 +46,16 @@ public static class HairMeshBuilder
     public static HairMesh Build(IReadOnlyList<Surface> surfaces, HairMeshLayer s, int seed)
     {
         // 1. roots: per triangle, as many as its area × density × mask, scattered at random points on it
-        var roots = new List<(Vector3 P, Vector3 N, int Surface, int A, int B, int C, Vector3 W)>();
+        var roots = new List<(Vector3 P, Vector3 N, int Surface, int A, int B, int C, Vector3 W, float Inner)>();
+        // how deep inside the patch a point is (0 at its edge, 1 well inside): the mask blurred over a few
+        // centimetres, so settings can blend from the patch's centre to its edge as procedural hair does
+        var blurred = new Dictionary<float[], float[]>();
         var rng = new Random(seed * 7919 + 17);
         for (var si = 0; si < surfaces.Count; si++)
         {
             var surface = surfaces[si];
             var shape = surface.Shape;
+            if (!blurred.TryGetValue(surface.Mask, out var soft)) blurred[surface.Mask] = soft = Blur(surface.Mask, surface.MaskWidth, surface.MaskHeight, Math.Max(2, surface.MaskWidth / 48));
             var normals = VertexNormals(shape);
             var P = shape.Positions; var U = shape.Uvs; var I = shape.Indices;
             for (var t = 0; t + 2 < I.Length; t += 3)
@@ -70,7 +74,8 @@ public static class HairMeshBuilder
                     var v = U[a * 2 + 1] * w0 + U[b * 2 + 1] * w1 + U[c * 2 + 1] * w2;
                     if (rng.NextDouble() >= Sample(surface, u, v)) continue; // the mask thins the roots out
                     var n = Vector3.Normalize(V(normals, a) * w0 + V(normals, b) * w1 + V(normals, c) * w2);
-                    roots.Add((pa * w0 + pb * w1 + pc * w2, n, si, a, b, c, new Vector3(w0, w1, w2)));
+                    var inner = Smooth(0.35f, 0.95f, Sample(soft, surface.MaskWidth, surface.MaskHeight, u, v));
+                    roots.Add((pa * w0 + pb * w1 + pc * w2, n, si, a, b, c, new Vector3(w0, w1, w2), inner));
                 }
             }
         }
@@ -90,14 +95,16 @@ public static class HairMeshBuilder
         var rSurf = new List<int>(); var rVerts = new List<int>(); var rW = new List<float>(); var rOff = new List<float>();
         var pos = new List<float>(); var nrm = new List<float>(); var tan = new List<float>(); var uv = new List<float>(); var idx = new List<uint>();
         var clumpCell = 0.4f + 2.5f * (1 - s.Clumping); // clumps are this far apart (body units)
-        foreach (var (root, n, si, ra, rb, rc, rw) in roots)
+        foreach (var (root, n, si, ra, rb, rc, rw, inner) in roots)
         {
             var sp = surfaces[si].Shape.Positions;
             var (fx, fy, fz) = Frame(V(sp, ra), V(sp, rb), V(sp, rc));
             var h = Hash(root);
             var h2 = Hash(root * 3.7f + new Vector3(11.3f));
             var stray = h2.X < s.Strays * 0.15f;
-            var length = s.Length * (1 - s.LengthVariation * h.X) * (stray ? 1.7f : 1f);
+            // toward the patch's edge hairs get shorter and lie flatter (inner and outer values, blended)
+            var length = s.Length * (1 - s.LengthVariation * h.X) * (stray ? 1.7f : 1f) * float.Lerp(s.EdgeLength, 1, inner);
+            var lieFlat = float.Lerp(MathF.Min(1, s.LieFlat + s.EdgeFlatten), s.LieFlat, inner);
             var twist = (h2.Y - 0.5f) * s.Twist * MathF.PI;
             var flow = Flow(root, n, s);
             var side = Vector3.Normalize(Vector3.Cross(n, flow));
@@ -105,7 +112,7 @@ public static class HairMeshBuilder
             var spread = (h.Y - 0.5f) * (0.3f + 0.9f * s.Curl);
             flow = Vector3.Normalize(flow * MathF.Cos(spread) + side * MathF.Sin(spread));
             side = Vector3.Normalize(Vector3.Cross(n, flow));
-            var lift = MathF.Min(s.Lift + (stray ? 0.35f : 0f), 1f) * MathF.PI * 0.5f;
+            var lift = MathF.Min(s.Lift * float.Lerp(1 - s.EdgeFlatten, 1, inner) + (stray ? 0.35f : 0f), 1f) * MathF.PI * 0.5f;
 
             // clump: the strand is pulled toward the clump's centre strand
             var clump = ClumpCentre(root, n, clumpCell);
@@ -119,7 +126,7 @@ public static class HairMeshBuilder
             {
                 var t = i / (float)segments;
                 // lifts off the skin at the root and lies back down along its length
-                var angle = lift * (1 - s.LieFlat * t);
+                var angle = lift * (1 - lieFlat * t);
                 var dir = flow * MathF.Cos(angle) + n * MathF.Sin(angle);
                 // curl: a wave from side to side along the strand
                 var wave = MathF.Sin(t * (4f + 6f * h.Z) + h.X * 6.28f) * s.Curl * 0.9f;
@@ -222,6 +229,41 @@ public static class HairMeshBuilder
         // project the centre onto this root's tangent plane, so the clump stays on the skin
         centre -= n * Vector3.Dot(centre - root, n);
         return centre;
+    }
+
+    private static float Sample(float[] mask, int w, int h, float u, float v) =>
+        mask[Math.Clamp((int)(v * h), 0, h - 1) * w + Math.Clamp((int)(u * w), 0, w - 1)];
+
+    private static float Smooth(float e0, float e1, float x) { var t = Math.Clamp((x - e0) / (e1 - e0), 0, 1); return t * t * (3 - 2 * t); }
+
+    /// <summary>A box blur of a mask (two passes each way, close to a Gaussian).</summary>
+    private static float[] Blur(float[] src, int w, int h, int r)
+    {
+        var a = (float[])src.Clone(); var b = new float[a.Length];
+        for (var pass = 0; pass < 2; pass++)
+        {
+            Parallel.For(0, h, y =>
+            {
+                float sum = 0; var row = y * w;
+                for (var x = -r; x <= r; x++) sum += a[row + Math.Clamp(x, 0, w - 1)];
+                for (var x = 0; x < w; x++)
+                {
+                    b[row + x] = sum / (2 * r + 1);
+                    sum += a[row + Math.Min(x + r + 1, w - 1)] - a[row + Math.Max(x - r, 0)];
+                }
+            });
+            Parallel.For(0, w, x =>
+            {
+                float sum = 0;
+                for (var y = -r; y <= r; y++) sum += b[Math.Clamp(y, 0, h - 1) * w + x];
+                for (var y = 0; y < h; y++)
+                {
+                    a[y * w + x] = sum / (2 * r + 1);
+                    sum += b[Math.Min(y + r + 1, h - 1) * w + x] - b[Math.Max(y - r, 0) * w + x];
+                }
+            });
+        }
+        return a;
     }
 
     private static float Sample(Surface s, float u, float v)

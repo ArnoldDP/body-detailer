@@ -30,7 +30,7 @@ public static class HairAtlas
                 // the curl's radius in texels: wide waves at low Curl, tight arcs and loops at full
                 var radius = size * (0.02f + 0.05f * (float)rng.NextDouble()) / MathF.Max(s.Curl * s.Curl, 0.02f);
                 var turn = (rng.NextDouble() < 0.5 ? -1 : 1) / radius;
-                var shade = 0.6f + 0.4f * (float)rng.NextDouble();
+                var shade = Math.Clamp(0.8f + (float)(rng.NextDouble() - 0.5) * 2 * s.ColorVariation, 0, 1);
                 var steps = (int)(length / 0.5f);
                 var stepLen = length / steps;
                 for (var i = 0; i <= steps; i++)
@@ -46,7 +46,9 @@ public static class HairAtlas
                     y += MathF.Sin(angle) * stepLen;
                     if (y >= size - 2) break;
                     var w = width * (1 - 0.6f * t);
-                    Stamp(px, coverage, size, x, y, w, shade, t, MathF.Cos(angle));
+                    // fades in at the root, so the hair grows out of the skin
+                    var fade = s.RootFade > 0 ? Math.Clamp(t / (0.2f * s.RootFade), 0, 1) : 1;
+                    Stamp(px, coverage, size, x, y, w, shade, t, MathF.Cos(angle), fade);
                 }
             }
         }
@@ -108,14 +110,14 @@ public static class HairAtlas
     }
 
     /// <summary>Draws one anti-aliased dot of a hair, keeping whichever hair covers a texel most.</summary>
-    private static void Stamp(byte[] px, float[] coverage, int size, float cx, float cy, float w, float shade, float t, float side)
+    private static void Stamp(byte[] px, float[] coverage, int size, float cx, float cy, float w, float shade, float t, float side, float fade)
     {
         int x0 = (int)(cx - w - 1), x1 = (int)(cx + w + 1), y0 = (int)(cy - w - 1), y1 = (int)(cy + w + 1);
         for (var y = Math.Max(0, y0); y <= Math.Min(size - 1, y1); y++)
         for (var x = Math.Max(0, x0); x <= Math.Min(size - 1, x1); x++)
         {
             var d = MathF.Sqrt((x + 0.5f - cx) * (x + 0.5f - cx) + (y + 0.5f - cy) * (y + 0.5f - cy));
-            var a = Math.Clamp((w * 0.5f + 0.5f - d) / 1f, 0, 1);
+            var a = Math.Clamp((w * 0.5f + 0.5f - d) / 1f, 0, 1) * fade;
             var i = y * size + x;
             if (a <= coverage[i]) continue;
             coverage[i] = a;

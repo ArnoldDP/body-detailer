@@ -623,7 +623,7 @@ public partial class MainWindow : Window
                     continue;
                 }
                 var snapshot = s.Clone().HairMesh; var seed = s.Seed;
-                var atlasKey = $"{seed}|{snapshot.Curl:0.000}|{snapshot.Frizz:0.000}|{snapshot.HairsPerCard}|{snapshot.HairThickness:0.000}";
+                var atlasKey = $"{seed}|{snapshot.Curl:0.000}|{snapshot.Frizz:0.000}|{snapshot.HairsPerCard}|{snapshot.HairThickness:0.000}|{snapshot.ColorVariation:0.000}|{snapshot.RootFade:0.000}";
                 if (atlasKey != _atlasKey)
                 {
                     var atlas = await Task.Run(() => HairAtlas.Generate(HairAtlasSize, snapshot, seed));

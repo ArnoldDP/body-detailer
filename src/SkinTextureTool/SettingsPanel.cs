@@ -34,6 +34,8 @@ public sealed class SettingsPanel : StackPanel
     }
 
     private IReadOnlyList<string> _groups = Array.Empty<string>();
+    /// <summary>The layers whose sections are open, kept when the panel is rebuilt.</summary>
+    private readonly HashSet<string> _expanded = new();
 
     /// <summary>The loaded texture groups (texture names); masks and detail maps are chosen per group.</summary>
     public IReadOnlyList<string> Groups
@@ -65,14 +67,31 @@ public sealed class SettingsPanel : StackPanel
             header.Children.Add(enabled);
             header.Children.Add(Bold(Spaced(prop.Name)));
 
-            foreach (var p in layer.GetType().GetProperties().Where(p => p.Name is not nameof(Layer.Enabled) and not nameof(Layer.MaskPaths)))
+            if (layer is HairMeshLayer hairLayer)
+            {
+                // preset buttons: set the shape sliders, then rebuild the panel to show them
+                var presets = new WrapPanel { Margin = new Thickness(0, 0, 0, 6) };
+                presets.Children.Add(new TextBlock { Text = "Presets:", VerticalAlignment = VerticalAlignment.Center, Margin = new Thickness(0, 0, 6, 0) });
+                foreach (var (presetName, apply) in HairMeshLayer.Presets)
+                {
+                    var button = new Button { Content = presetName, Padding = new Thickness(8, 1, 8, 1), Margin = new Thickness(0, 0, 4, 2) };
+                    button.Click += (_, _) => { apply(hairLayer); Rebuild(); RaiseHair(); };
+                    presets.Children.Add(button);
+                }
+                body.Children.Add(presets);
+            }
+            foreach (var p in layer.GetType().GetProperties().Where(p => p.Name is not nameof(Layer.Enabled) and not nameof(Layer.MaskPaths) && p.CanWrite))
                 AddProperty(body, layer, p, prop.Name);
             if (layer.GetType().GetCustomAttribute<MaskableAttribute>() != null)
                 AddPerGroupPickers(body, "Mask", layer.MaskPaths, hair ? RaiseHair : Raise);
             if (layer is NormalLayer normals)
                 AddPerGroupPickers(body, "Detail map", normals.DetailMaps, Raise);
 
-            Children.Add(new Expander { Header = header, Content = body, Margin = new Thickness(0, 0, 0, 4) });
+            var expander = new Expander { Header = header, Content = body, Margin = new Thickness(0, 0, 0, 4), IsExpanded = _expanded.Contains(prop.Name) };
+            var layerName = prop.Name;
+            expander.Expanded += (_, _) => _expanded.Add(layerName);
+            expander.Collapsed += (_, _) => _expanded.Remove(layerName);
+            Children.Add(expander);
         }
         _building = false;
     }
