@@ -921,9 +921,12 @@ public partial class MainWindow : Window
             var name = HairNameBox.Dispatcher.Invoke(() => HairNameBox.Text);
             var key = Mutagen.Bethesda.Plugins.FormKey.Factory(npcKey);
             var editorId = session.Cache.Resolve<Mutagen.Bethesda.Skyrim.INpcGetter>(key).EditorID ?? key.IDString();
-            var (files, path) = HairExporter.AttachToMesh(folder, Path.Combine("Body Detailer Genitals", HairExporter.Safe(editorId)), meshFile, name,
-                hair.Mesh, hair.Surfaces, hair.Look, hair.Atlas, HairAtlasSize);
-            written.AddRange(files); mesh = path;
+            // the slider sets: the body's (Normal sliders tab) and the add-on's own, found from where it's built to
+            var genitalSet = SkinTextureTool.Core.BodySlide.SliderSetFinder.ForMesh(session.Data, piece.MeshPath, BodyMesh.Load(meshFile)[0].Name);
+            var sets = hair.Surfaces.Select(s => string.Equals(s.NifPath, meshFile, StringComparison.OrdinalIgnoreCase) ? genitalSet : Sliders.Dispatcher.Invoke(() => Sliders.SetFor(s.NifPath))).ToList();
+            var (files, path, attachNotes) = HairExporter.AttachToMesh(folder, Path.Combine("Body Detailer Genitals", HairExporter.Safe(editorId)), meshFile, name,
+                hair.Mesh, hair.Surfaces, hair.Look, hair.Atlas, HairAtlasSize, sets, genitalSet);
+            written.AddRange(files); mesh = path; notes.AddRange(attachNotes);
             notes.Add("The hair is part of the add-on's mesh copy (one slot-52 piece); re-export after rebuilding the add-on or the body in BodySlide.");
         }
         var (plugin, n) = piece.Write(session, Mutagen.Bethesda.Plugins.FormKey.Factory(npcKey), folder, textures, mesh);

@@ -261,9 +261,12 @@ public static class HairExporter
     /// <param name="genital">The add-on's _1 mesh file; its _0 is beside it.</param>
     /// <param name="folder">Where the copies go, under meshes and textures.</param>
     /// <returns>The files written and the _1 copy's path under meshes.</returns>
-    public static (List<string> Written, string MeshPath) AttachToMesh(string output, string folder, string genital, string name, HairMesh mesh,
-        IReadOnlyList<ShapeData> surfaces, HairMeshLayer look, byte[] atlas, int atlasSize)
+    /// <param name="sets">The slider set for each surface the hair grew on, and <paramref name="genitalSet"/> the add-on's own:
+    /// with all of them, a BodySlide project that builds the add-on and hair together (with morphs) is written too.</param>
+    public static (List<string> Written, string MeshPath, List<string> Notes) AttachToMesh(string output, string folder, string genital, string name, HairMesh mesh,
+        IReadOnlyList<ShapeData> surfaces, HairMeshLayer look, byte[] atlas, int atlasSize, IReadOnlyList<SliderSet?>? sets = null, SliderSet? genitalSet = null)
     {
+        var notes = new List<string>();
         if (mesh.VertexCount > ushort.MaxValue) throw new InvalidOperationException($"The hair has {mesh.VertexCount:N0} vertices; a game shape holds at most 65,535.");
         var written = new List<string>();
         var file = Safe(name);
@@ -294,7 +297,22 @@ public static class HairExporter
             written.Add(rel);
             if (weight == "_1") meshPath = Path.Combine(folder, Variant(stem, "_1"));
         }
-        return (written, meshPath!);
+
+        // the BodySlide project for the combined piece: the add-on's reference mesh with the hair, its own slider data
+        // and the hair's, built to the copies' place so BodySlide (with Build Morphs) also writes their .tri
+        if (sets == null || genitalSet == null || sets.Any(t => t == null))
+            notes.Add("No BodySlide project for the combined piece: " + (genitalSet == null ? "the add-on's slider set wasn't found." : "a slider set is missing for the body (Normal sliders tab)."));
+        else
+        {
+            try
+            {
+                var setName = "Body Detailer " + Path.GetFileName(folder) + " " + Path.GetFileNameWithoutExtension(Variant(stem, "")).TrimEnd('_');
+                written.AddRange(WriteBodySlide(output, file, folder, mesh, surfaces, sets.Select(t => t!).ToList(), diffuseRel, normalRel, notes,
+                    Safe(setName), Path.GetFileNameWithoutExtension(Variant(stem, "_1"))[..^2], genitalSet));
+            }
+            catch (Exception ex) { notes.Add("BodySlide project skipped: " + ex.Message); }
+        }
+        return (written, meshPath!, notes);
     }
 
     /// <summary>Each vertex's (bone index, weight) pairs, from an SE triangle shape's vertex data.</summary>
@@ -320,8 +338,13 @@ public static class HairExporter
 
     // ---------- BodySlide ----------
 
+    /// <param name="file">The hair shape's name.</param>
+    /// <param name="setName">The project's name (and its ShapeData folder).</param>
+    /// <param name="outputFile">What BodySlide builds (beside "_0"/"_1"), under meshes\<paramref name="folder"/>.</param>
+    /// <param name="into">A slider set whose mesh the hair joins (a genital add-on's): its reference mesh is the project's
+    /// base, and its shapes and their slider data are carried over, so BodySlide builds the add-on and hair as one.</param>
     private static IEnumerable<string> WriteBodySlide(string output, string file, string folder, HairMesh mesh, IReadOnlyList<ShapeData> surfaces,
-        IReadOnlyList<SliderSet> sets, string diffuseRel, string normalRel, List<string> notes)
+        IReadOnlyList<SliderSet> sets, string diffuseRel, string normalRel, List<string> notes, string? setName = null, string? outputFile = null, SliderSet? into = null)
     {
         // each surface's reference mesh: the zero-slider shape its own slider set's offsets are from
         var refNifs = new List<string>(); var refPositions = new List<float[]>();
@@ -336,10 +359,12 @@ public static class HairExporter
         }
         var positions = HairMeshBuilder.Rebase(mesh, refPositions);
 
-        var name = file;
+        var name = setName ?? file;
         var bodySlide = Path.Combine(output, "CalienteTools", "BodySlide");
         var dataDir = Path.Combine(bodySlide, "ShapeData", name);
-        WriteNif(surfaces.Select((s, i) => (refNifs[i], s.Name)).ToList(), mesh, positions, Path.Combine(dataDir, name + ".nif"), file, diffuseRel, normalRel);
+        var intoNif = into != null ? Path.Combine(into.ShapeDataFolder, into.SourceFile) : null;
+        if (intoNif != null && !File.Exists(intoNif)) throw new FileNotFoundException($"{into!.Name}'s reference mesh {intoNif} isn't there");
+        WriteNif(surfaces.Select((s, i) => (refNifs[i], s.Name)).ToList(), mesh, positions, Path.Combine(dataDir, name + ".nif"), file, diffuseRel, normalRel, intoNif);
 
         // each slider's offsets for the hair, conformed as Outfit Studio does it: every hair vertex takes the offsets
         // of the vertices nearest to it on the surface it grew on (distance weighted), from that surface's own slider
@@ -352,7 +377,19 @@ public static class HairExporter
             nearest[v] = (si, verts, weights);
         });
         var osdCache = new Dictionary<string, Dictionary<string, OsdFile.Diff[]>>(StringComparer.OrdinalIgnoreCase);
-        var sliderNames = sets.SelectMany(t => t.Sliders.Where(x => x.MovesVertices).Select(x => x.Name)).Distinct(StringComparer.OrdinalIgnoreCase).ToList();
+        var allSets = into != null ? sets.Append(into).ToList() : sets.ToList();
+        var sliderNames = allSets.SelectMany(t => t.Sliders.Where(x => x.MovesVertices).Select(x => x.Name)).Distinct(StringComparer.OrdinalIgnoreCase).ToList();
+        // the joined set's own shapes keep their slider data: entry name, shape, offsets
+        var carried = new List<(string Slider, string Entry, string Shape, Dictionary<int, System.Numerics.Vector3> Diffs)>();
+        if (into != null)
+            foreach (var slider in into.Sliders.Where(x => x.MovesVertices))
+                foreach (var data in slider.Data.Where(d => into.Shapes.Contains(d.TargetShape, StringComparer.OrdinalIgnoreCase)))
+                {
+                    var path = Path.Combine(into.ShapeDataFolder, data.OsdFile);
+                    if (!osdCache.TryGetValue(path, out var osd)) osdCache[path] = osd = File.Exists(path) ? OsdFile.Read(path) : new();
+                    if (!osd.TryGetValue(data.EntryName, out var diffs)) continue;
+                    carried.Add((slider.Name, data.EntryName, data.TargetShape, diffs.ToDictionary(d => (int)d.Index, d => new System.Numerics.Vector3(d.X, d.Y, d.Z))));
+                }
         var entries = new List<(string Slider, string Entry, Dictionary<int, System.Numerics.Vector3> Diffs)>();
         foreach (var sliderName in sliderNames)
         {
@@ -382,31 +419,35 @@ public static class HairExporter
             }
             if (hairDiffs.Count > 0) entries.Add((sliderName, file + sliderName, hairDiffs));
         }
-        WriteOsd(Path.Combine(dataDir, name + ".osd"), entries.Select(e => (e.Entry, e.Diffs)).ToList());
+        WriteOsd(Path.Combine(dataDir, name + ".osd"), entries.Select(e => (e.Entry, e.Diffs)).Concat(carried.Select(c => (c.Entry, c.Diffs))).ToList());
 
         // the project: the sets' own sliders (names, defaults, inversion; the first set that has each), each pointing
         // at the hair's data
-        var setElements = sets.Distinct().Select(t => XDocument.Load(t.OspPath).Descendants("SliderSet").First(x => (string?)x.Attribute("name") == t.Name)).ToList();
-        var outFile = setElements[0].Element("OutputFile");
+        var setElements = allSets.Distinct().Select(t => XDocument.Load(t.OspPath).Descendants("SliderSet").First(x => (string?)x.Attribute("name") == t.Name)).ToList();
+        var outFile = (into != null ? setElements[^1] : setElements[0]).Element("OutputFile");
         var project = new XElement("SliderSet", new XAttribute("name", name),
             new XElement("DataFolder", name),
             new XElement("SourceFile", name + ".nif"),
             new XElement("OutputPath", Path.Combine("meshes", folder)),
-            new XElement("OutputFile", outFile?.Attributes().Where(a => a.Name == "GenWeights"), file),
-            new XElement("Shape", new XAttribute("target", file), file));
+            new XElement("OutputFile", outFile?.Attributes().Where(a => a.Name == "GenWeights"), outputFile ?? file));
+        foreach (var shape in (into?.Shapes ?? new List<string>()).Append(file)) project.Add(new XElement("Shape", new XAttribute("target", shape), shape));
         var withData = entries.ToDictionary(e => e.Slider, e => e.Entry, StringComparer.OrdinalIgnoreCase);
         var added = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
         foreach (var s in setElements.SelectMany(e => e.Elements("Slider")))
         {
             var sliderName = (string?)s.Attribute("name") ?? "";
-            if (!withData.TryGetValue(sliderName, out var entry) || !added.Add(sliderName)) continue;
-            project.Add(new XElement("Slider", s.Attributes(),
-                new XElement("Data", new XAttribute("name", entry), new XAttribute("target", file), new XAttribute("local", "true"), $"{name}.osd\\{entry}")));
+            var datas = new List<XElement>();
+            if (withData.TryGetValue(sliderName, out var entry))
+                datas.Add(new XElement("Data", new XAttribute("name", entry), new XAttribute("target", file), new XAttribute("local", "true"), $"{name}.osd\\{entry}"));
+            foreach (var c in carried.Where(c => string.Equals(c.Slider, sliderName, StringComparison.OrdinalIgnoreCase)))
+                datas.Add(new XElement("Data", new XAttribute("name", c.Entry), new XAttribute("target", c.Shape), new XAttribute("local", "true"), $"{name}.osd\\{c.Entry}"));
+            if (datas.Count == 0 || !added.Add(sliderName)) continue;
+            project.Add(new XElement("Slider", s.Attributes(), datas));
         }
         var ospRel = Path.Combine("CalienteTools", "BodySlide", "SliderSets", name + ".osp");
         Directory.CreateDirectory(Path.GetDirectoryName(Path.Combine(output, ospRel))!);
         new XDocument(new XElement("SliderSetInfo", new XAttribute("version", 1), project)).Save(Path.Combine(output, ospRel));
-        notes.Add($"BodySlide: build \"{name}\" with your body preset to fit the hair to it ({entries.Count} sliders from {string.Join(" and ", sets.Distinct().Select(t => t.Name))}).");
+        notes.Add($"BodySlide: build \"{name}\" with your body preset and Build Morphs ticked ({added.Count} sliders from {string.Join(" and ", allSets.Distinct().Select(t => t.Name))}).");
         return new[] { ospRel, Path.Combine("CalienteTools", "BodySlide", "ShapeData", name, name + ".nif"), Path.Combine("CalienteTools", "BodySlide", "ShapeData", name, name + ".osd") };
     }
 
