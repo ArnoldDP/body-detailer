@@ -19,6 +19,9 @@ public sealed class GenitalPanel : StackPanel
     public ComboBox Addon { get; } = new() { Margin = new Thickness(0, 2, 0, 0) };
     public TextBox Mask { get; } = new();
     public CheckBox AttachHair { get; } = new() { Content = "Attach the hair mesh (below) to it, as one slot-52 piece", IsChecked = true, Margin = new Thickness(0, 2, 0, 0) };
+    public ComboBox Preset { get; } = new() { Margin = new Thickness(0, 2, 0, 0) };
+    public CheckBox BuildAfter { get; } = new() { Content = "Build it with this preset after baking (no BodySlide needed)", IsChecked = true, Margin = new Thickness(0, 4, 0, 0) };
+    public Button BuildNow { get; } = new() { Content = "Build now", Padding = new Thickness(8, 2, 8, 2), Margin = new Thickness(0, 4, 0, 0), HorizontalAlignment = HorizontalAlignment.Left };
     public CheckBox ShowInPreview { get; } = new() { Content = "Show the add-on in the preview", IsChecked = true, Margin = new Thickness(0, 8, 0, 0) };
     public CheckBox Distribute { get; } = new() { Content = "Give it to the loaded NPC (patch plugin, slot 52)", IsChecked = true, Margin = new Thickness(0, 8, 0, 0) };
     public Button Bake { get; } = new() { Content = "Bake and export", Padding = new Thickness(0, 6, 0, 6), Margin = new Thickness(0, 10, 0, 0), FontWeight = FontWeights.SemiBold };
@@ -53,6 +56,10 @@ public sealed class GenitalPanel : StackPanel
         Children.Add(ShowInPreview);
         Children.Add(Distribute);
         Children.Add(AttachHair);
+        Children.Add(new TextBlock { Text = "BodySlide preset (for building the add-on with the hair)", Margin = new Thickness(0, 8, 0, 0) });
+        Children.Add(Preset);
+        Children.Add(BuildAfter);
+        Children.Add(BuildNow);
         Children.Add(Bake);
         Children.Add(Info);
         Children.Add(_preview);

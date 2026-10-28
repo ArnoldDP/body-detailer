@@ -115,6 +115,7 @@ public partial class MainWindow : Window
         Sliders.Changed += () => _geometryDebounce.Start();
         Closing += (_, _) => SaveState();
         Genitals.Bake.Click += OnBakeGenitals;
+        Genitals.BuildNow.Click += OnBuildGenitals;
         Genitals.Addon.SelectionChanged += (_, _) => _ = ShowAddonAsync();
         Genitals.ShowInPreview.Checked += (_, _) => _ = ShowAddonAsync();
         Genitals.ShowInPreview.Unchecked += (_, _) => _ = ShowAddonAsync();
@@ -271,6 +272,7 @@ public partial class MainWindow : Window
             Status($"Loading {npc.Name}…");
             var session = _session;
             var addons = await Task.Run(() => GenitalAddon.List(session));
+            await FillPresetsAsync(session);
             Genitals.Addon.ItemsSource = addons.Select(a => new AddonChoice(a)).ToList();
             if (addons.Count > 0) Genitals.Addon.SelectedIndex = 0;
             var (loaded, notes) = await Task.Run(() =>
@@ -904,6 +906,55 @@ public partial class MainWindow : Window
         }
     }
 
+    /// <summary>The combined add-on + hair BodySlide project written for each NPC (by form key), to build.</summary>
+    private readonly Dictionary<string, string> _combinedProjects = new();
+
+    /// <summary>The load order's BodySlide presets, with the one BodySlide last used selected.</summary>
+    private async Task FillPresetsAsync(SkinTextureTool.Core.Patcher.GameSession session)
+    {
+        if (Genitals.Preset.Items.Count > 0) return;
+        var (presets, last) = await Task.Run(() =>
+        {
+            var all = SkinTextureTool.Core.BodySlide.SliderPreset.All(session.Data);
+            string? selected = null;
+            try
+            {
+                var config = session.Data.Materialize(Path.Combine("CalienteTools", "BodySlide", "BodySlide.xml"));
+                if (config != null) selected = System.Xml.Linq.XDocument.Load(config).Descendants("SelectedPreset").FirstOrDefault()?.Value;
+            }
+            catch { /* no remembered preset */ }
+            return (all, selected);
+        });
+        Genitals.Preset.ItemsSource = presets;
+        Genitals.Preset.SelectedItem = presets.FirstOrDefault(p => p.Name == last) ?? presets.FirstOrDefault();
+    }
+
+    /// <summary>Builds the NPC's combined project with the chosen preset into the export folder, where its patch points (with morphs).</summary>
+    private List<string> BuildCombined(string npcKey, string folder, SkinTextureTool.Core.BodySlide.SliderPreset? preset, List<string> notes)
+    {
+        if (!_combinedProjects.TryGetValue(npcKey, out var osp) || !File.Exists(osp)) { notes.Add("There's no combined project for this NPC yet (bake with the hair attached first)."); return new(); }
+        var set = SkinTextureTool.Core.BodySlide.SliderSet.Load(osp)[0];
+        var written = SkinTextureTool.Core.BodySlide.Builder.Build(set, preset, folder, true, notes);
+        notes.Add($"Built {set.Name} with {(preset?.Name ?? "the set's defaults")} (with morphs).");
+        return written;
+    }
+
+    private async void OnBuildGenitals(object? sender, RoutedEventArgs e)
+    {
+        if (_loadedNpc is not { } entry) { Genitals.Info.Text = "Load an NPC first (Load NPC)."; return; }
+        var folder = ExportFolderBox.Text.Trim();
+        var preset = Genitals.Preset.SelectedItem as SkinTextureTool.Core.BodySlide.SliderPreset;
+        Genitals.BuildNow.IsEnabled = false;
+        try
+        {
+            var notes = new List<string>();
+            var written = await Task.Run(() => BuildCombined(entry.FormKey, folder, preset, notes));
+            Genitals.Info.Text = (written.Count > 0 ? $"Wrote {string.Join(", ", written)}. " : "") + string.Join(" ", notes);
+        }
+        catch (Exception ex) { Genitals.Info.Text = "Couldn't build: " + ex.Message; }
+        finally { Genitals.BuildNow.IsEnabled = true; }
+    }
+
     /// <summary>What was baked for each NPC (by form key): its add-on piece, the mesh file and the baked maps' paths.</summary>
     private readonly Dictionary<string, (GenitalAddon Piece, string MeshFile, (string, string, string, string) Textures)> _bakedPieces = new();
 
@@ -927,6 +978,13 @@ public partial class MainWindow : Window
             var (files, path, attachNotes) = HairExporter.AttachToMesh(folder, Path.Combine("Body Detailer Genitals", HairExporter.Safe(editorId)), meshFile, name,
                 hair.Mesh, hair.Surfaces, hair.Look, hair.Atlas, HairAtlasSize, sets, genitalSet);
             written.AddRange(files); mesh = path; notes.AddRange(attachNotes);
+            var osp = files.FirstOrDefault(f => f.EndsWith(".osp", StringComparison.OrdinalIgnoreCase));
+            if (osp != null)
+            {
+                lock (_combinedProjects) _combinedProjects[npcKey] = Path.Combine(folder, osp);
+                var (build, preset) = Genitals.Dispatcher.Invoke(() => (Genitals.BuildAfter.IsChecked == true, Genitals.Preset.SelectedItem as SkinTextureTool.Core.BodySlide.SliderPreset));
+                if (build) written.AddRange(BuildCombined(npcKey, folder, preset, notes));
+            }
             notes.Add("The hair is part of the add-on's mesh copy (one slot-52 piece); re-export after rebuilding the add-on or the body in BodySlide.");
         }
         var (plugin, n) = piece.Write(session, Mutagen.Bethesda.Plugins.FormKey.Factory(npcKey), folder, textures, mesh);
