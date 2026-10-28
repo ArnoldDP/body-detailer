@@ -17,11 +17,15 @@ public sealed record Slider(string Name, bool Uv, bool Zap, bool Hidden, IReadOn
 /// </summary>
 public sealed record SliderSet(string Name, string OspPath, string DataFolder, string SourceFile, IReadOnlyList<string> Shapes, IReadOnlyList<Slider> Sliders)
 {
+    /// <summary>The ShapeData folder, when it was found elsewhere than beside the .osp (another mod in the load order).</summary>
+    public string? DataFolderPath { get; init; }
+
     /// <summary>The ShapeData folder the set's .osd files live in: …\CalienteTools\BodySlide\ShapeData\&lt;DataFolder&gt;.</summary>
     public string ShapeDataFolder
     {
         get
         {
+            if (DataFolderPath != null) return DataFolderPath;
             // .osp files sit in …\BodySlide\SliderSets[\sub]; ShapeData is a sibling of SliderSets
             var dir = Path.GetDirectoryName(OspPath)!;
             while (dir != null && !string.Equals(Path.GetFileName(dir), "SliderSets", StringComparison.OrdinalIgnoreCase))

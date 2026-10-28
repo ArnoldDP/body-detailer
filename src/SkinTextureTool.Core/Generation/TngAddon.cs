@@ -32,7 +32,8 @@ public static class TngAddon
     /// <param name="meshPath">The hair NIF's path under meshes (the _1 file; the game picks _0/_1 by weight).</param>
     /// <param name="npc">The NPC to assign it to, as "0x&lt;id&gt;~Plugin.esp" (the plugin that created the NPC), or null.</param>
     /// <returns>The files written, relative to <paramref name="output"/>.</returns>
-    public static List<string> Write(string output, string file, string displayName, string meshPath, string? npc)
+    /// <param name="with">A genital add-on whose pieces the TNG add-on carries too (for hair grown around them), or null.</param>
+    public static List<string> Write(string output, string file, string displayName, string meshPath, string? npc, IArmorGetter? with = null)
     {
         var plugin = file + " - TNG.esp";
         var mod = new SkyrimMod(ModKey.FromFileName(plugin), SkyrimRelease.SkyrimSE);
@@ -52,12 +53,19 @@ public static class TngAddon
         armor.BodyTemplate = slot.DeepCopy();
         armor.Armature.Add(addon.ToLink());
         armor.Keywords = new Noggog.ExtendedList<IFormLinkGetter<IKeywordGetter>> { AddonFemale.ToLink<IKeywordGetter>() };
+        if (with != null)
+        {
+            // one choice in TNG's menu: the add-on's own pieces (per race, as it has them) and the hair
+            foreach (var piece in with.Armature) armor.Armature.Add(piece.FormKey.ToLink<IArmorAddonGetter>());
+            armor.Keywords.Add(NpcSkinPatch.SkinWithPenis.ToLink<IKeywordGetter>());
+            armor.Name = $"{with.Name?.String ?? with.EditorID} with {displayName}";
+        }
 
         Directory.CreateDirectory(output);
         // masters in load order (Skyrim.esm first), not alphabetical
         mod.WriteToBinary(Path.Combine(output, plugin), new Mutagen.Bethesda.Plugins.Binary.Parameters.BinaryWriteParameters
         {
-            MastersListOrdering = new Mutagen.Bethesda.Plugins.Binary.Parameters.MastersListOrderingByLoadOrder(new[] { Skyrim, Dawnguard, Dragonborn, Tng }),
+            MastersListOrdering = new Mutagen.Bethesda.Plugins.Binary.Parameters.MastersListOrderingByLoadOrder(new[] { Skyrim, Dawnguard, Dragonborn, Tng }.Concat(with != null ? new[] { with.FormKey.ModKey } : Array.Empty<ModKey>()).Distinct()),
         });
         var written = new List<string> { plugin };
 

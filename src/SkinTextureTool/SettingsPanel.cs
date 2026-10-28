@@ -34,6 +34,10 @@ public sealed class SettingsPanel : StackPanel
     }
 
     private IReadOnlyList<string> _groups = Array.Empty<string>();
+    /// <summary>Only this layer (by property name), or every layer but <see cref="Exclude"/> when null.</summary>
+    public string? Only { get; set; }
+    /// <summary>Layers left out (by property name), shown elsewhere.</summary>
+    public HashSet<string> Exclude { get; } = new();
     /// <summary>The layers whose sections are open, kept when the panel is rebuilt.</summary>
     private readonly HashSet<string> _expanded = new();
 
@@ -51,11 +55,15 @@ public sealed class SettingsPanel : StackPanel
         _building = true;
         Children.Clear();
 
-        var general = new StackPanel { Margin = new Thickness(4) };
-        foreach (var name in TopLevelOrder) AddProperty(general, _settings, typeof(SkinSettings).GetProperty(name)!, null);
-        Children.Add(new Expander { Header = Bold("General"), Content = general, IsExpanded = true, Margin = new Thickness(0, 0, 0, 4) });
+        if (Only == null)
+        {
+            var general = new StackPanel { Margin = new Thickness(4) };
+            foreach (var name in TopLevelOrder) AddProperty(general, _settings, typeof(SkinSettings).GetProperty(name)!, null);
+            Children.Add(new Expander { Header = Bold("General"), Content = general, IsExpanded = true, Margin = new Thickness(0, 0, 0, 4) });
+        }
 
-        foreach (var prop in typeof(SkinSettings).GetProperties().Where(p => typeof(Layer).IsAssignableFrom(p.PropertyType)))
+        foreach (var prop in typeof(SkinSettings).GetProperties().Where(p => typeof(Layer).IsAssignableFrom(p.PropertyType)
+                     && (Only == null ? !Exclude.Contains(p.Name) : p.Name == Only)))
         {
             var layer = (Layer)prop.GetValue(_settings)!;
             var body = new StackPanel { Margin = new Thickness(4) };

@@ -80,7 +80,10 @@ public partial class MainWindow : Window
         _hairDebounce.Tick += (_, _) => { _hairDebounce.Stop(); _ = RebuildHairAsync(); };
 
         var state = LoadState();
+        Settings.Exclude.Add(nameof(SkinSettings.HairMesh));
+        HairSettings.Only = nameof(SkinSettings.HairMesh);
         Settings.Settings = state.Settings;
+        HairSettings.Settings = state.Settings;
         Sliders.Settings = state.Settings;
         Regions.Settings = state.Settings;
         Regions.Changed += () => _debounce.Start();
@@ -101,10 +104,12 @@ public partial class MainWindow : Window
         LimbSizeBox.SelectedIndex = Math.Clamp(state.LimbSize, 0, LimbSizeBox.Items.Count - 1);
         Settings.Changed += () => _debounce.Start();
         Settings.GeometryChanged += () => _geometryDebounce.Start();
-        Settings.HairChanged += () => { _hairDebounce.Stop(); _hairDebounce.Start(); };
+        HairSettings.HairChanged += () => { _hairDebounce.Stop(); _hairDebounce.Start(); };
         Sliders.Changed += () => _geometryDebounce.Start();
         Closing += (_, _) => SaveState();
         Genitals.Bake.Click += OnBakeGenitals;
+        Genitals.Addon.SelectionChanged += (_, _) => { if (HairOnAddonBox.IsChecked == true) _hairDebounce.Start(); };
+        Genitals.Mask.TextChanged += (_, _) => { if (HairOnAddonBox.IsChecked == true) _hairDebounce.Start(); };
         var saved = state.Nifs.Where(File.Exists).ToList();
         // a command-line export brings its own meshes, so the saved ones aren't reloaded
         if (saved.Count > 0) Loaded += async (_, _) => { if (!Headless) await AddNifsAsync(saved); };
@@ -366,6 +371,7 @@ public partial class MainWindow : Window
             ExportButton.IsEnabled = false;
             _groups = Array.Empty<string>();
             Settings.Groups = _groups;
+            HairSettings.Groups = _groups;
             Regions.Groups = _groups;
             await Preview.Run(() => Preview.Renderer.SetMesh(Array.Empty<(string, IReadOnlyList<MeshInput>)>()));
             Painter.SetMesh(Array.Empty<(string, IReadOnlyList<MeshInput>)>());
@@ -408,6 +414,7 @@ public partial class MainWindow : Window
         {
             _groups = names;
             Settings.Groups = names;
+            HairSettings.Groups = names;
             Regions.Groups = names;
         }
         _meshReady = true;
@@ -579,6 +586,39 @@ public partial class MainWindow : Window
     // ---------- hair mesh ----------
 
     private readonly Dictionary<string, (DateTime Stamp, float[] Grey, int W, int H)> _hairMasks = new(StringComparer.OrdinalIgnoreCase);
+    /// <summary>The genital add-on's mesh (data path) the current hair also grew on, or null.</summary>
+    private string? _hairAddon;
+    private readonly Dictionary<string, ShapeData> _addonMeshes = new(StringComparer.OrdinalIgnoreCase);
+
+    private void OnHairOnAddonChanged(object sender, RoutedEventArgs e) { if (IsLoaded) _hairDebounce.Start(); }
+
+    /// <summary>The selected genital add-on's mesh for the loaded NPC, with the blend mask as where hair grows (all of it without one).</summary>
+    private async Task<(HairMeshBuilder.Surface Surface, string MeshPath)?> AddonSurfaceAsync()
+    {
+        if (_session is not { } session || _loadedNpc is not { } entry || Genitals.Addon.SelectedItem is not AddonChoice choice) return null;
+        var maskPath = Genitals.Mask.Text.Trim();
+        return await Task.Run<(HairMeshBuilder.Surface, string)?>(() =>
+        {
+            var npc = session.Cache.Resolve<Mutagen.Bethesda.Skyrim.INpcGetter>(Mutagen.Bethesda.Plugins.FormKey.Factory(entry.FormKey));
+            if (GenitalAddon.For(session, choice.Armor, npc) is not { } piece) return null;
+            if (!_addonMeshes.TryGetValue(piece.MeshPath, out var shape))
+            {
+                var file = session.Data.Materialize(piece.MeshPath);
+                if (file == null) return null;
+                lock (_addonMeshes) _addonMeshes[piece.MeshPath] = shape = Merge(BodyMesh.Load(file));
+            }
+            float[] grey; int w, h;
+            if (maskPath.Length > 0 && File.Exists(maskPath))
+            {
+                var m = ImageFiles.Load(maskPath);
+                (w, h) = (m.Width, m.Height);
+                grey = new float[w * h];
+                for (var i = 0; i < grey.Length; i++) grey[i] = m.Rgba[i * 4] / 255f;
+            }
+            else { (w, h) = (1, 1); grey = new[] { 1f }; }
+            return (new HairMeshBuilder.Surface(shape, grey, w, h), piece.MeshPath);
+        });
+    }
     private bool _hairBuilding, _hairAgain;
     private string? _atlasKey;
     private byte[]? _hairAtlasPixels;
@@ -618,6 +658,13 @@ public partial class MainWindow : Window
                         _hairMasks[path] = m = (stamp, grey, image.Width, image.Height);
                     }
                     surfaces.AddRange(shapes.Select(x => new HairMeshBuilder.Surface(x.Shape, m.Grey, m.W, m.H)));
+                }
+                _hairAddon = null;
+                if (HairOnAddonBox.IsChecked == true)
+                {
+                    var extra = await AddonSurfaceAsync();
+                    if (extra == null) HairInfo.Text = "Hair mesh: load an NPC and pick the add-on in the Genitals tab to grow hair on it";
+                    else { surfaces.Add(extra.Value.Surface); _hairAddon = extra.Value.MeshPath; }
                 }
                 if (surfaces.Count == 0)
                 {
@@ -662,16 +709,23 @@ public partial class MainWindow : Window
         try
         {
             Status("Writing the hair mesh…");
-            var sets = built.Surfaces.Select(s => Sliders.SetFor(s.NifPath)).ToList();
+            var addonMesh = _hairAddon;
+            var sessionNow = _session;
+            var sets = await Task.Run(() => built.Surfaces.Select(s =>
+                addonMesh != null && sessionNow != null && _addonMeshes.TryGetValue(addonMesh, out var a) && ReferenceEquals(a, s)
+                    ? SkinTextureTool.Core.BodySlide.SliderSetFinder.ForMesh(sessionNow.Data, addonMesh, s.Name)
+                    : Sliders.SetFor(s.NifPath)).ToList());
             var name = HairNameBox.Text;
             var result = await Task.Run(() => HairExporter.Export(folder, name, built.Mesh, built.Surfaces, sets, built.Look, built.Atlas, HairAtlasSize));
             var file = HairExporter.Safe(name);
             var meshPath = Path.Combine(HairExporter.Folder, file + "_1.nif");
             if (TngAddonBox.IsChecked == true)
             {
-                var plugin = await Task.Run(() => TngAddon.Write(folder, file, name.Trim(), meshPath, null));
+                // with hair on the add-on, the TNG add-on carries the add-on's pieces too, as one choice
+                var with = addonMesh != null && Genitals.Addon.SelectedItem is AddonChoice c ? c.Armor : null;
+                var plugin = await Task.Run(() => TngAddon.Write(folder, file, name.Trim(), meshPath, null, with));
                 result.Written.AddRange(plugin);
-                result.Notes.Add($"Enable {plugin[0]} after TheNewGentleman.esp and pick it per NPC in TNG's menu.");
+                result.Notes.Add($"Enable {plugin[0]} after TheNewGentleman.esp{(with != null ? " (and " + with.FormKey.ModKey.FileName + ")" : "")} and pick it per NPC in TNG's menu.");
             }
             if (TngAssignBox.IsChecked == true && _loadedNpc is { } npc && _session is { } session)
             {
@@ -1085,6 +1139,7 @@ public partial class MainWindow : Window
     private void ApplySettings(SkinSettings settings)
     {
         Settings.Settings = settings;
+        HairSettings.Settings = settings;
         Sliders.Settings = settings;
         Regions.Settings = settings;
         Painter.Settings = settings;

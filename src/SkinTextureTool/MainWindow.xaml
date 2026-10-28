@@ -117,15 +117,6 @@
                                Text="Each texture group is written as name.dds, name_msn.dds, name_s.dds and name_sk.dds (BC7 with mipmaps)."/>
                     <Button x:Name="ExportButton" Content="Export textures" Margin="0,8,0,0" Padding="0,6" FontWeight="SemiBold"
                             Click="OnExport" IsEnabled="False"/>
-
-                    <TextBlock Text="Hair mesh" FontWeight="SemiBold" Margin="0,14,0,2"/>
-                    <TextBlock Text="Name"/>
-                    <TextBox x:Name="HairNameBox" Text="Pubic Hair"/>
-                    <CheckBox x:Name="TngAddonBox" Content="Make a TNG add-on (pick it in TNG's menu)" Margin="0,4,0,0"/>
-                    <CheckBox x:Name="TngAssignBox" Content="Add it to the loaded NPC's skin (Load NPC first)" Margin="0,2,0,0" IsEnabled="False"
-                              ToolTip="A patch plugin: a copy of the NPC's skin with the hair on slot 52, worn by the NPC (TNG hides it under covering clothing)"/>
-                    <Button x:Name="HairExportButton" Content="Export hair mesh" Margin="0,6,0,0" Padding="0,4" Click="OnExportHair"
-                            ToolTip="Writes the hair NIF (_0 and _1), its textures and a BodySlide project into the export folder"/>
                 </StackPanel>
             </ScrollViewer>
 
@@ -172,7 +163,23 @@
                 </TabItem>
                 <TabItem Header="Genitals">
                     <ScrollViewer VerticalScrollBarVisibility="Auto">
-                        <local:GenitalPanel x:Name="Genitals" Margin="6"/>
+                        <StackPanel Margin="6">
+                            <local:GenitalPanel x:Name="Genitals"/>
+                            <Separator Margin="0,14,0,8"/>
+                            <TextBlock Text="Pubic hair (hair mesh)" FontWeight="SemiBold" FontSize="14" Margin="0,0,0,4"/>
+                            <CheckBox x:Name="HairOnAddonBox" Content="Also grow it around the add-on's base (its blend mask above)" Margin="0,0,0,6"
+                                      Checked="OnHairOnAddonChanged" Unchecked="OnHairOnAddonChanged"
+                                      ToolTip="Hair on the genital mesh where its blend mask is white, skinned to its bones so it moves with it. The add-on isn't drawn in the preview."/>
+                            <local:SettingsPanel x:Name="HairSettings"/>
+                            <TextBlock Text="Name" Margin="0,8,0,0"/>
+                            <TextBox x:Name="HairNameBox" Text="Pubic Hair"/>
+                            <CheckBox x:Name="TngAddonBox" Content="Make a TNG add-on (pick it in TNG's menu)" Margin="0,4,0,0"
+                                      ToolTip="With hair on the add-on, the TNG add-on carries the add-on's own pieces too, as one choice"/>
+                            <CheckBox x:Name="TngAssignBox" Content="Add it to the loaded NPC's skin (Load NPC first)" Margin="0,2,0,0" IsEnabled="False"
+                                      ToolTip="The NPC's patch plugin: its skin copy with the hair on slot 52 (TNG hides it under covering clothing)"/>
+                            <Button x:Name="HairExportButton" Content="Export hair mesh" Margin="0,6,0,0" Padding="0,6" Click="OnExportHair" FontWeight="SemiBold"
+                                    ToolTip="Writes the hair NIF (_0 and _1), its textures and a BodySlide project into the export folder"/>
+                        </StackPanel>
                     </ScrollViewer>
                 </TabItem>
                 <TabItem Header="Load order patcher">

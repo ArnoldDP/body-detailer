@@ -41,19 +41,18 @@ public static class HairExporter
 
         // the mesh as grown, on the body as loaded: usable straight away (both weights, until BodySlide builds them)
         var meshRel = Path.Combine("meshes", folder, file);
-        var source = surfaces[0].NifPath;
         foreach (var w in new[] { "_0", "_1" })
         {
-            WriteNif(source, surfaces.Select(s => s.Name).ToList(), mesh, mesh.Positions, Path.Combine(output, meshRel + w + ".nif"), file, diffuseRel, normalRel);
+            WriteNif(surfaces.Select(s => (s.NifPath, s.Name)).ToList(), mesh, mesh.Positions, Path.Combine(output, meshRel + w + ".nif"), file, diffuseRel, normalRel);
             written.Add(meshRel + w + ".nif");
         }
 
         // the BodySlide project: the hair rebuilt on the slider set's reference body, with every slider's offsets
-        var set = sets.FirstOrDefault(s => s != null);
-        if (set == null) notes.Add("No BodySlide slider set is chosen for the body (Normal sliders tab), so no BodySlide project was written.");
+        var missing = surfaces.Where((s, i) => sets[i] == null).Select(s => s.Name).Distinct().ToList();
+        if (missing.Count > 0) notes.Add($"No BodySlide slider set was found for {string.Join(", ", missing)} (choose one in the Normal sliders tab), so no BodySlide project was written.");
         else
         {
-            try { written.AddRange(WriteBodySlide(output, file, folder, mesh, surfaces, set, diffuseRel, normalRel, notes)); }
+            try { written.AddRange(WriteBodySlide(output, file, folder, mesh, surfaces, sets.Select(t => t!).ToList(), diffuseRel, normalRel, notes)); }
             catch (Exception ex) { notes.Add("BodySlide project skipped: " + ex.Message); }
         }
         return new Result(written, notes);
@@ -62,107 +61,139 @@ public static class HairExporter
     // ---------- NIF ----------
 
     /// <summary>
-    /// Builds the hair shape in a copy of <paramref name="sourceNif"/> (so it has the body's skeleton), skinned to the
-    /// body's bones with each vertex's weights blended from its root triangle, then removes the body shapes.
+    /// Builds the hair shape in a copy of the first surface's NIF (so it has the body's skeleton), skinned to the
+    /// bones of the shapes it grew on with each vertex's weights blended from its root triangle, then removes the
+    /// other shapes. Surfaces can come from different NIFs (the body, a genital add-on): their bones are matched by
+    /// name, and bones the first NIF lacks are copied in from the NIF that has them.
     /// </summary>
-    private static void WriteNif(string sourceNif, IReadOnlyList<string> surfaceShapes, HairMesh mesh, float[] positions, string target, string shapeName,
+    private static void WriteNif(IReadOnlyList<(string Nif, string Shape)> surfaces, HairMesh mesh, float[] positions, string target, string shapeName,
         string diffuseRel, string normalRel)
     {
         using var nif = new NifFile();
-        if (nif.Load(sourceNif) != 0) throw new IOException($"Couldn't read {sourceNif}.");
-        var shapes = nif.GetShapes().ToList();
-        var bodies = surfaceShapes.Select(n => shapes.FirstOrDefault(s => s.name.get() == n) ?? throw new InvalidDataException($"{Path.GetFileName(sourceNif)} has no shape {n}.")).ToList();
-
-        // bones: the union of the body shapes' bones (node block ids), and each shape's local bone index into it
-        var union = new List<int>(); var local = new List<int[]>();
-        foreach (var body in bodies)
+        if (nif.Load(surfaces[0].Nif) != 0) throw new IOException($"Couldn't read {surfaces[0].Nif}.");
+        var others = new Dictionary<string, NifFile>(StringComparer.OrdinalIgnoreCase);
+        try
         {
-            var ids = new vectorint();
-            nif.GetShapeBoneIDList(body, ids);
-            local.Add(ids.Select(id => { var i = union.IndexOf(id); if (i < 0) { union.Add(id); i = union.Count - 1; } return i; }).ToArray());
-        }
-        var weights = bodies.Select(VertexWeights).ToList();
-
-        var toSkin = new MatTransform();
-        nif.GetShapeTransformGlobalToSkin(bodies[0], toSkin);
-        var verts = new vectorVector3(); var uvs = new vectorVector2(); var norms = new vectorVector3(); var tris = new vectorTriangle();
-        for (var v = 0; v < mesh.VertexCount; v++)
-        {
-            var p = toSkin.ApplyTransform(new Vector3(positions[v * 3], positions[v * 3 + 1], positions[v * 3 + 2]));
-            verts.Add(p);
-            uvs.Add(new Vector2(mesh.Uvs[v * 2], mesh.Uvs[v * 2 + 1]));
-            norms.Add(new Vector3(mesh.Normals[v * 3], mesh.Normals[v * 3 + 1], mesh.Normals[v * 3 + 2]));
-        }
-        for (var i = 0; i < mesh.Indices.Length; i += 3)
-            tris.Add(new Triangle((ushort)mesh.Indices[i], (ushort)mesh.Indices[i + 1], (ushort)mesh.Indices[i + 2]));
-
-        var hair = nif.CreateShapeFromData(shapeName, verts, tris, uvs, norms);
-        // weights: the root triangle's three vertices' weights, blended by the root's barycentric weights (by union
-        // bone index), up to four per vertex
-        var vertexWeights = new List<(int Bone, float Weight)>[mesh.VertexCount];
-        for (var v = 0; v < mesh.VertexCount; v++)
-        {
-            var si = mesh.RootSurface[v];
-            var blend = new Dictionary<int, float>();
-            for (var k = 0; k < 3; k++)
+            NifFile Open(string path)
             {
-                var w = mesh.RootWeights[v * 3 + k];
-                foreach (var (bone, bw) in weights[si][mesh.RootVertices[v * 3 + k]])
-                {
-                    var u = local[si][bone];
-                    blend[u] = blend.GetValueOrDefault(u) + bw * w;
-                }
+                if (string.Equals(path, surfaces[0].Nif, StringComparison.OrdinalIgnoreCase)) return nif;
+                if (others.TryGetValue(path, out var o)) return o;
+                o = new NifFile();
+                if (o.Load(path) != 0) throw new IOException($"Couldn't read {path}.");
+                return others[path] = o;
             }
-            var top = blend.Where(kv => kv.Value > 1e-4f).OrderByDescending(kv => kv.Value).Take(4).ToList();
-            var sum = top.Sum(kv => kv.Value);
-            vertexWeights[v] = top.Select(kv => (kv.Key, sum > 0 ? kv.Value / sum : 0)).ToList();
-        }
 
-        // skinned to only the bones it uses (as hand-made add-ons are), numbered 0..n-1
-        var used = vertexWeights.SelectMany(w => w.Select(x => x.Bone)).Distinct().OrderBy(b => b).ToList();
-        var compact = used.Select((u, i) => (u, i)).ToDictionary(x => x.u, x => x.i);
-        nif.CreateSkinning(hair);
-        var boneIds = new vectorint();
-        foreach (var u in used) boneIds.Add(union[u]);
-        nif.SetShapeBoneIDList(hair, boneIds);
-        nif.SetShapeTransformGlobalToSkin(hair, toSkin);
-        for (var b = 0; b < used.Count; b++)
+            // each surface's shape, its bones by name, its weights and its skin-to-bone transforms
+            var names = new List<string>(); var local = new List<int[]>(); var weights = new List<List<(int Bone, float Weight)>[]>();
+            var skinToBone = new Dictionary<int, MatTransform>(); var boneSource = new Dictionary<int, NifFile>();
+            MatTransform? toSkin = null;
+            foreach (var (path, name) in surfaces)
+            {
+                var file = Open(path);
+                var shape = file.GetShapes().FirstOrDefault(s => s.name.get() == name) ?? throw new InvalidDataException($"{Path.GetFileName(path)} has no shape {name}.");
+                if (toSkin == null) { toSkin = new MatTransform(); file.GetShapeTransformGlobalToSkin(shape, toSkin); }
+                var bones = new vectorstring();
+                file.GetShapeBoneList(shape, bones);
+                var map = new int[bones.Count];
+                for (var b = 0; b < bones.Count; b++)
+                {
+                    var u = names.IndexOf(bones[b]);
+                    if (u < 0)
+                    {
+                        names.Add(bones[b]); u = names.Count - 1;
+                        var t = new MatTransform();
+                        file.GetShapeTransformSkinToBone(shape, (uint)b, t);
+                        skinToBone[u] = t; boneSource[u] = file;
+                    }
+                    map[b] = u;
+                }
+                local.Add(map);
+                weights.Add(VertexWeights(shape));
+            }
+
+            var verts = new vectorVector3(); var uvs = new vectorVector2(); var norms = new vectorVector3(); var tris = new vectorTriangle();
+            for (var v = 0; v < mesh.VertexCount; v++)
+            {
+                var p = toSkin!.ApplyTransform(new Vector3(positions[v * 3], positions[v * 3 + 1], positions[v * 3 + 2]));
+                verts.Add(p);
+                uvs.Add(new Vector2(mesh.Uvs[v * 2], mesh.Uvs[v * 2 + 1]));
+                norms.Add(new Vector3(mesh.Normals[v * 3], mesh.Normals[v * 3 + 1], mesh.Normals[v * 3 + 2]));
+            }
+            for (var i = 0; i < mesh.Indices.Length; i += 3)
+                tris.Add(new Triangle((ushort)mesh.Indices[i], (ushort)mesh.Indices[i + 1], (ushort)mesh.Indices[i + 2]));
+
+            var hair = nif.CreateShapeFromData(shapeName, verts, tris, uvs, norms);
+            // weights: the root triangle's three vertices' weights, blended by the root's barycentric weights (by
+            // bone, across the surfaces), up to four per vertex
+            var vertexWeights = new List<(int Bone, float Weight)>[mesh.VertexCount];
+            for (var v = 0; v < mesh.VertexCount; v++)
+            {
+                var si = mesh.RootSurface[v];
+                var blend = new Dictionary<int, float>();
+                for (var k = 0; k < 3; k++)
+                {
+                    var w = mesh.RootWeights[v * 3 + k];
+                    foreach (var (bone, bw) in weights[si][mesh.RootVertices[v * 3 + k]])
+                    {
+                        var u = local[si][bone];
+                        blend[u] = blend.GetValueOrDefault(u) + bw * w;
+                    }
+                }
+                var top = blend.Where(kv => kv.Value > 1e-4f).OrderByDescending(kv => kv.Value).Take(4).ToList();
+                var sum = top.Sum(kv => kv.Value);
+                vertexWeights[v] = top.Select(kv => (kv.Key, sum > 0 ? kv.Value / sum : 0)).ToList();
+            }
+
+            // skinned to only the bones it uses (as hand-made add-ons are), numbered 0..n-1; a bone the first NIF
+            // lacks (a genital bone) is copied in from the NIF that has it
+            var used = vertexWeights.SelectMany(w => w.Select(x => x.Bone)).Distinct().OrderBy(b => b).ToList();
+            var compact = used.Select((u, i) => (u, i)).ToDictionary(x => x.u, x => x.i);
+            nif.CreateSkinning(hair);
+            var boneIds = new vectorint();
+            foreach (var u in used)
+            {
+                var node = nif.FindBlockByNameNiNode(names[u]);
+                var id = node != null ? (int)nif.GetHeader().GetBlockID(node) : (int)nif.CloneNamedNode(names[u], boneSource[u]);
+                boneIds.Add(id);
+            }
+            nif.SetShapeBoneIDList(hair, boneIds);
+            nif.SetShapeTransformGlobalToSkin(hair, toSkin!);
+            for (var b = 0; b < used.Count; b++) nif.SetShapeTransformSkinToBone(hair, (uint)b, skinToBone[used[b]]);
+            for (var v = 0; v < mesh.VertexCount; v++)
+            {
+                var bones = new vectoruchar(); var ws = new vectorfloat();
+                foreach (var (bone, w) in vertexWeights[v]) { bones.Add((byte)compact[bone]); ws.Add(w); }
+                nif.SetShapeVertWeights(shapeName, (ushort)v, bones, ws);
+            }
+
+            // one dismember partition on the add-on slot
+            var parts = new NiVectorBSDismemberSkinInstancePartitionInfo();
+            parts.push_back(new BSDismemberSkinInstance.PartitionInfo { flags = (PartitionFlags)1, partID = (ushort)Slot });
+            var triParts = new vectorint();
+            for (var i = 0; i < tris.Count; i++) triParts.Add(0);
+            nif.SetShapePartitions(hair, parts, triParts, true);
+            nif.UpdateSkinPartitions(hair);
+            nif.CalcTangentsForShape(hair);
+
+            // shading: skinned, two sided, alpha tested at the cutoff the hair texture's mips were built for
+            var shader = nif.GetShader(hair);
+            shader?.SetSkinned(true);
+            shader?.SetDoubleSided(true);
+            nif.SetTextureSlot(hair, diffuseRel, 0);
+            nif.SetTextureSlot(hair, normalRel, 1);
+            var alpha = new NiAlphaProperty { flags = 4844, threshold = (byte)(HairAtlas.Cutoff * 255) };
+            nif.AssignAlphaProperty(hair, alpha);
+            GC.SuppressFinalize(alpha); // the NIF owns it now; the wrapper mustn't free it too
+
+            foreach (var body in nif.GetShapes().Where(s => s.name.get() != shapeName).ToList()) nif.DeleteShape(body);
+            FillPartitionBones(nif, used.Count);
+            Directory.CreateDirectory(Path.GetDirectoryName(Path.GetFullPath(target))!);
+            if (nif.Save(target) != 0) throw new IOException($"Couldn't write {target}.");
+        }
+        finally
         {
-            var (si, li) = Enumerable.Range(0, bodies.Count).Select(s => (s, Array.IndexOf(local[s], used[b]))).First(x => x.Item2 >= 0);
-            var t = new MatTransform();
-            nif.GetShapeTransformSkinToBone(bodies[si], (uint)li, t);
-            nif.SetShapeTransformSkinToBone(hair, (uint)b, t);
+            foreach (var o in others.Values) o.Dispose();
         }
-        for (var v = 0; v < mesh.VertexCount; v++)
-        {
-            var bones = new vectoruchar(); var ws = new vectorfloat();
-            foreach (var (bone, w) in vertexWeights[v]) { bones.Add((byte)compact[bone]); ws.Add(w); }
-            nif.SetShapeVertWeights(shapeName, (ushort)v, bones, ws);
-        }
-
-        // one dismember partition on the add-on slot
-        var parts = new NiVectorBSDismemberSkinInstancePartitionInfo();
-        parts.push_back(new BSDismemberSkinInstance.PartitionInfo { flags = (PartitionFlags)1, partID = (ushort)Slot });
-        var triParts = new vectorint();
-        for (var i = 0; i < tris.Count; i++) triParts.Add(0);
-        nif.SetShapePartitions(hair, parts, triParts, true);
-        nif.UpdateSkinPartitions(hair);
-        nif.CalcTangentsForShape(hair);
-
-        // shading: skinned, two sided, alpha tested at the cutoff the hair texture's mips were built for
-        var shader = nif.GetShader(hair);
-        shader?.SetSkinned(true);
-        shader?.SetDoubleSided(true);
-        nif.SetTextureSlot(hair, diffuseRel, 0);
-        nif.SetTextureSlot(hair, normalRel, 1);
-        var alpha = new NiAlphaProperty { flags = 4844, threshold = (byte)(HairAtlas.Cutoff * 255) };
-        nif.AssignAlphaProperty(hair, alpha);
-        GC.SuppressFinalize(alpha); // the NIF owns it now; the wrapper mustn't free it too
-
-        foreach (var body in nif.GetShapes().Where(s => s.name.get() != shapeName).ToList()) nif.DeleteShape(body);
-        FillPartitionBones(nif, used.Count);
-        Directory.CreateDirectory(Path.GetDirectoryName(Path.GetFullPath(target))!);
-        if (nif.Save(target) != 0) throw new IOException($"Couldn't write {target}.");
     }
 
     /// <summary>
@@ -222,29 +253,29 @@ public static class HairExporter
     // ---------- BodySlide ----------
 
     private static IEnumerable<string> WriteBodySlide(string output, string file, string folder, HairMesh mesh, IReadOnlyList<ShapeData> surfaces,
-        SliderSet set, string diffuseRel, string normalRel, List<string> notes)
+        IReadOnlyList<SliderSet> sets, string diffuseRel, string normalRel, List<string> notes)
     {
-        // the reference body the set's sliders are offsets from
-        var sourceNif = Path.Combine(set.ShapeDataFolder, set.SourceFile);
-        if (!File.Exists(sourceNif)) throw new FileNotFoundException($"the slider set's reference mesh {sourceNif} isn't there");
-        var reference = BodyMesh.Load(sourceNif);
-        var refPositions = new List<float[]>();
-        foreach (var s in surfaces)
+        // each surface's reference mesh: the zero-slider shape its own slider set's offsets are from
+        var refNifs = new List<string>(); var refPositions = new List<float[]>();
+        for (var si = 0; si < surfaces.Count; si++)
         {
-            var r = reference.FirstOrDefault(x => x.Name == s.Name) ?? throw new InvalidDataException($"the reference mesh has no shape {s.Name}");
-            if (r.VertexCount != s.VertexCount) throw new InvalidDataException($"{s.Name} has {s.VertexCount} vertices but the reference has {r.VertexCount} (zapped sliders?)");
-            refPositions.Add(r.Positions);
+            var set = sets[si]; var s = surfaces[si];
+            var sourceNif = Path.Combine(set.ShapeDataFolder, set.SourceFile);
+            if (!File.Exists(sourceNif)) throw new FileNotFoundException($"{set.Name}'s reference mesh {sourceNif} isn't there");
+            var r = BodyMesh.Load(sourceNif).FirstOrDefault(x => x.Name == s.Name) ?? throw new InvalidDataException($"{set.Name}'s reference mesh has no shape {s.Name}");
+            if (r.VertexCount != s.VertexCount) throw new InvalidDataException($"{s.Name} has {s.VertexCount} vertices but {set.Name}'s reference has {r.VertexCount} (zapped sliders?)");
+            refNifs.Add(sourceNif); refPositions.Add(r.Positions);
         }
         var positions = HairMeshBuilder.Rebase(mesh, refPositions);
 
         var name = file;
         var bodySlide = Path.Combine(output, "CalienteTools", "BodySlide");
         var dataDir = Path.Combine(bodySlide, "ShapeData", name);
-        WriteNif(sourceNif, surfaces.Select(s => s.Name).ToList(), mesh, positions, Path.Combine(dataDir, name + ".nif"), file, diffuseRel, normalRel);
+        WriteNif(surfaces.Select((s, i) => (refNifs[i], s.Name)).ToList(), mesh, positions, Path.Combine(dataDir, name + ".nif"), file, diffuseRel, normalRel);
 
         // each slider's offsets for the hair, conformed as Outfit Studio does it: every hair vertex takes the offsets
-        // of the body vertices nearest to it (distance weighted), so a card follows the skin under each part of it,
-        // not just under its root
+        // of the vertices nearest to it on the surface it grew on (distance weighted), from that surface's own slider
+        // set, so a card follows the skin under each part of it, not just under its root
         var nearest = new (int Surface, int[] Vertices, float[] Weights)[mesh.VertexCount];
         Parallel.For(0, mesh.VertexCount, v =>
         {
@@ -253,13 +284,17 @@ public static class HairExporter
             nearest[v] = (si, verts, weights);
         });
         var osdCache = new Dictionary<string, Dictionary<string, OsdFile.Diff[]>>(StringComparer.OrdinalIgnoreCase);
+        var sliderNames = sets.SelectMany(t => t.Sliders.Where(x => x.MovesVertices).Select(x => x.Name)).Distinct(StringComparer.OrdinalIgnoreCase).ToList();
         var entries = new List<(string Slider, string Entry, Dictionary<int, System.Numerics.Vector3> Diffs)>();
-        foreach (var slider in set.Sliders.Where(s => s.MovesVertices))
+        foreach (var sliderName in sliderNames)
         {
             var perSurface = new Dictionary<int, System.Numerics.Vector3>[surfaces.Count];
             for (var si = 0; si < surfaces.Count; si++)
             {
                 perSurface[si] = new Dictionary<int, System.Numerics.Vector3>();
+                var set = sets[si];
+                var slider = set.Sliders.FirstOrDefault(x => x.MovesVertices && string.Equals(x.Name, sliderName, StringComparison.OrdinalIgnoreCase));
+                if (slider == null) continue;
                 foreach (var data in slider.Data.Where(d => string.Equals(d.TargetShape, surfaces[si].Name, StringComparison.OrdinalIgnoreCase)))
                 {
                     var path = Path.Combine(set.ShapeDataFolder, data.OsdFile);
@@ -277,14 +312,14 @@ public static class HairExporter
                     if (perSurface[si].TryGetValue(verts[k], out var d)) sum += d * weights[k];
                 if (sum.LengthSquared() > 1e-10f) hairDiffs[v] = sum;
             }
-            if (hairDiffs.Count > 0) entries.Add((slider.Name, file + slider.Name, hairDiffs));
+            if (hairDiffs.Count > 0) entries.Add((sliderName, file + sliderName, hairDiffs));
         }
         WriteOsd(Path.Combine(dataDir, name + ".osd"), entries.Select(e => (e.Entry, e.Diffs)).ToList());
 
-        // the project: the body set's own sliders (names, defaults, inversion), each pointing at the hair's data
-        var bodyDoc = XDocument.Load(set.OspPath);
-        var bodySet = bodyDoc.Descendants("SliderSet").First(s => (string?)s.Attribute("name") == set.Name);
-        var outFile = bodySet.Element("OutputFile");
+        // the project: the sets' own sliders (names, defaults, inversion; the first set that has each), each pointing
+        // at the hair's data
+        var setElements = sets.Distinct().Select(t => XDocument.Load(t.OspPath).Descendants("SliderSet").First(x => (string?)x.Attribute("name") == t.Name)).ToList();
+        var outFile = setElements[0].Element("OutputFile");
         var project = new XElement("SliderSet", new XAttribute("name", name),
             new XElement("DataFolder", name),
             new XElement("SourceFile", name + ".nif"),
@@ -292,17 +327,18 @@ public static class HairExporter
             new XElement("OutputFile", outFile?.Attributes().Where(a => a.Name == "GenWeights"), file),
             new XElement("Shape", new XAttribute("target", file), file));
         var withData = entries.ToDictionary(e => e.Slider, e => e.Entry, StringComparer.OrdinalIgnoreCase);
-        foreach (var s in bodySet.Elements("Slider"))
+        var added = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
+        foreach (var s in setElements.SelectMany(e => e.Elements("Slider")))
         {
             var sliderName = (string?)s.Attribute("name") ?? "";
-            if (!withData.TryGetValue(sliderName, out var entry)) continue;
+            if (!withData.TryGetValue(sliderName, out var entry) || !added.Add(sliderName)) continue;
             project.Add(new XElement("Slider", s.Attributes(),
                 new XElement("Data", new XAttribute("name", entry), new XAttribute("target", file), new XAttribute("local", "true"), $"{name}.osd\\{entry}")));
         }
         var ospRel = Path.Combine("CalienteTools", "BodySlide", "SliderSets", name + ".osp");
         Directory.CreateDirectory(Path.GetDirectoryName(Path.Combine(output, ospRel))!);
         new XDocument(new XElement("SliderSetInfo", new XAttribute("version", 1), project)).Save(Path.Combine(output, ospRel));
-        notes.Add($"BodySlide: build \"{name}\" with your body preset to fit the hair to it ({entries.Count} sliders carried over from {set.Name}).");
+        notes.Add($"BodySlide: build \"{name}\" with your body preset to fit the hair to it ({entries.Count} sliders from {string.Join(" and ", sets.Distinct().Select(t => t.Name))}).");
         return new[] { ospRel, Path.Combine("CalienteTools", "BodySlide", "ShapeData", name, name + ".nif"), Path.Combine("CalienteTools", "BodySlide", "ShapeData", name, name + ".osd") };
     }
 
