@@ -769,10 +769,19 @@ public partial class MainWindow : Window
             }
             if (TngAssignBox.IsChecked == true && _loadedNpc is { } npc && _session is { } session)
             {
-                var (plugin, notes) = await Task.Run(() => NpcSkinPatch.Write(session, Mutagen.Bethesda.Plugins.FormKey.Factory(npc.FormKey), folder, file, meshPath));
-                result.Written.Add(plugin);
-                result.Notes.AddRange(notes);
-                result.Notes.Add($"Enable {plugin} at the end of your load order (it overrides {npc.EditorId}, like a patch).");
+                if (_bakedPieces.ContainsKey(npc.FormKey) && Genitals.AttachHair.IsChecked == true)
+                {
+                    // one slot-52 piece: the hair goes into the copy of the NPC's baked add-on mesh
+                    var (w, n) = await Task.Run(() => WriteGenitals(session, npc.FormKey, folder, true));
+                    result.Written.AddRange(w); result.Notes.AddRange(n);
+                }
+                else
+                {
+                    var (plugin, notes) = await Task.Run(() => NpcSkinPatch.Write(session, Mutagen.Bethesda.Plugins.FormKey.Factory(npc.FormKey), folder, file, meshPath, new[] { "Genitals" }));
+                    result.Written.Add(plugin);
+                    result.Notes.AddRange(notes);
+                    result.Notes.Add($"Enable {plugin} at the end of your load order (it overrides {npc.EditorId}, like a patch).");
+                }
             }
             Status($"Wrote {result.Written.Count} hair file(s) to {folder}. " + string.Join(" ", result.Notes));
         }
@@ -820,6 +829,7 @@ public partial class MainWindow : Window
         if (body == null) { Genitals.Info.Text = "The NPC's body isn't loaded."; return; }
         var maskPath = Genitals.Mask.Text.Trim();
         var distribute = Genitals.Distribute.IsChecked == true;
+        var attach = Genitals.AttachHair.IsChecked == true;
         var formats = new[] { FormatFor("diffuse"), FormatFor("normal"), FormatFor("subsurface"), FormatFor("specular") };
         Genitals.Bake.IsEnabled = false;
         try
@@ -871,12 +881,12 @@ public partial class MainWindow : Window
                     if (m == 0) preview = px;
                     if (m <= 1) bakedMaps[m] = new RgbaImage(size, size, px);
                 }
+                string Keep(int m, string? original) => paths[m] ?? original ?? "";
+                lock (_bakedPieces) _bakedPieces[entry.FormKey] = (piece, meshFile, (Keep(0, null), Keep(1, tex?.NormalOrGloss?.GivenPath), Keep(2, tex?.GlowOrDetailMap?.GivenPath), Keep(3, tex?.BacklightMaskOrSpecular?.GivenPath)));
                 if (distribute)
                 {
-                    string Keep(int m, string? original) => paths[m] ?? original ?? "";
-                    var (plugin, n) = piece.Write(session, npcKey, folder, (Keep(0, null), Keep(1, tex?.NormalOrGloss?.GivenPath), Keep(2, tex?.GlowOrDetailMap?.GivenPath), Keep(3, tex?.BacklightMaskOrSpecular?.GivenPath)));
-                    written.Add(plugin); notes.AddRange(n);
-                    notes.Add($"Enable {plugin} at the end of your load order.");
+                    var (w, n) = WriteGenitals(session, entry.FormKey, folder, attach);
+                    written.AddRange(w); notes.AddRange(n);
                 }
                 return (Written: written, Notes: notes, Preview: preview, Size: size, Mesh: piece.MeshPath, Maps: bakedMaps);
             });
@@ -892,6 +902,34 @@ public partial class MainWindow : Window
         {
             Genitals.Bake.IsEnabled = true;
         }
+    }
+
+    /// <summary>What was baked for each NPC (by form key): its add-on piece, the mesh file and the baked maps' paths.</summary>
+    private readonly Dictionary<string, (GenitalAddon Piece, string MeshFile, (string, string, string, string) Textures)> _bakedPieces = new();
+
+    /// <summary>
+    /// Gives the NPC its baked genitals, with the current hair mesh attached to a copy of the add-on's mesh when
+    /// there is hair and that's chosen (one slot-52 piece; the separate hair piece is dropped from its patch).
+    /// </summary>
+    private (List<string> Written, List<string> Notes) WriteGenitals(SkinTextureTool.Core.Patcher.GameSession session, string npcKey, string folder, bool withHair)
+    {
+        var (piece, meshFile, textures) = _bakedPieces[npcKey];
+        var written = new List<string>(); var notes = new List<string>();
+        string? mesh = null;
+        if (withHair && _hairBuilt is { } hair && hair.Mesh.VertexCount > 0)
+        {
+            var name = HairNameBox.Dispatcher.Invoke(() => HairNameBox.Text);
+            var key = Mutagen.Bethesda.Plugins.FormKey.Factory(npcKey);
+            var editorId = session.Cache.Resolve<Mutagen.Bethesda.Skyrim.INpcGetter>(key).EditorID ?? key.IDString();
+            var (files, path) = HairExporter.AttachToMesh(folder, Path.Combine("Body Detailer Genitals", HairExporter.Safe(editorId)), meshFile, name,
+                hair.Mesh, hair.Surfaces, hair.Look, hair.Atlas, HairAtlasSize);
+            written.AddRange(files); mesh = path;
+            notes.Add("The hair is part of the add-on's mesh copy (one slot-52 piece); re-export after rebuilding the add-on or the body in BodySlide.");
+        }
+        var (plugin, n) = piece.Write(session, Mutagen.Bethesda.Plugins.FormKey.Factory(npcKey), folder, textures, mesh);
+        written.Add(plugin); notes.AddRange(n);
+        notes.Add($"Enable {plugin} at the end of your load order.");
+        return (written, notes);
     }
 
     /// <summary>The baked add-on maps for the loaded NPC (diffuse, normal), shown in the preview after a bake.</summary>

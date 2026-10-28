@@ -1,3 +1,4 @@
+using System.Text.RegularExpressions;
 using System.Xml.Linq;
 using BCnEncoder.Encoder;
 using BCnEncoder.Shared;
@@ -66,17 +67,19 @@ public static class HairExporter
     /// other shapes. Surfaces can come from different NIFs (the body, a genital add-on): their bones are matched by
     /// name, and bones the first NIF lacks are copied in from the NIF that has them.
     /// </summary>
+    /// <param name="into">A mesh to add the hair to, keeping its own shapes (a genital add-on's), instead of a copy of the first surface's NIF.</param>
     private static void WriteNif(IReadOnlyList<(string Nif, string Shape)> surfaces, HairMesh mesh, float[] positions, string target, string shapeName,
-        string diffuseRel, string normalRel)
+        string diffuseRel, string normalRel, string? into = null)
     {
+        var basePath = into ?? surfaces[0].Nif;
         using var nif = new NifFile();
-        if (nif.Load(surfaces[0].Nif) != 0) throw new IOException($"Couldn't read {surfaces[0].Nif}.");
+        if (nif.Load(basePath) != 0) throw new IOException($"Couldn't read {basePath}.");
         var others = new Dictionary<string, NifFile>(StringComparer.OrdinalIgnoreCase);
         try
         {
             NifFile Open(string path)
             {
-                if (string.Equals(path, surfaces[0].Nif, StringComparison.OrdinalIgnoreCase)) return nif;
+                if (string.Equals(path, basePath, StringComparison.OrdinalIgnoreCase)) return nif;
                 if (others.TryGetValue(path, out var o)) return o;
                 o = new NifFile();
                 if (o.Load(path) != 0) throw new IOException($"Couldn't read {path}.");
@@ -148,13 +151,22 @@ public static class HairExporter
             // lacks (a genital bone) is copied in from the NIF that has it
             var used = vertexWeights.SelectMany(w => w.Select(x => x.Bone)).Distinct().OrderBy(b => b).ToList();
             var compact = used.Select((u, i) => (u, i)).ToDictionary(x => x.u, x => x.i);
+            var partitionsBefore = PartitionBlocks(nif);
             nif.CreateSkinning(hair);
             var boneIds = new vectorint();
             foreach (var u in used)
             {
                 var node = nif.FindBlockByNameNiNode(names[u]);
-                var id = node != null ? (int)nif.GetHeader().GetBlockID(node) : (int)nif.CloneNamedNode(names[u], boneSource[u]);
-                boneIds.Add(id);
+                if (node == null)
+                {
+                    // a bone this mesh lacks: added under the root at its place in the skeleton (as the NIF that has it
+                    // places it), so the node is part of the scene and the skin's reference to it is kept
+                    var t = new MatTransform();
+                    boneSource[u].GetNodeTransformToGlobal(names[u], t);
+                    nif.AddNode(names[u], t, nif.GetRootNode());
+                    node = nif.FindBlockByNameNiNode(names[u]) ?? throw new InvalidDataException($"Couldn't add the bone {names[u]}.");
+                }
+                boneIds.Add((int)nif.GetHeader().GetBlockID(node));
             }
             nif.SetShapeBoneIDList(hair, boneIds);
             nif.SetShapeTransformGlobalToSkin(hair, toSkin!);
@@ -185,8 +197,12 @@ public static class HairExporter
             nif.AssignAlphaProperty(hair, alpha);
             GC.SuppressFinalize(alpha); // the NIF owns it now; the wrapper mustn't free it too
 
-            foreach (var body in nif.GetShapes().Where(s => s.name.get() != shapeName).ToList()) nif.DeleteShape(body);
-            FillPartitionBones(nif, used.Count);
+            if (into == null)
+            {
+                foreach (var body in nif.GetShapes().Where(s => s.name.get() != shapeName).ToList()) nif.DeleteShape(body);
+                FillPartitionBones(nif, used.Count, new HashSet<uint>());
+            }
+            else FillPartitionBones(nif, used.Count, partitionsBefore); // only the hair's: the mesh's own shapes keep theirs
             Directory.CreateDirectory(Path.GetDirectoryName(Path.GetFullPath(target))!);
             if (nif.Save(target) != 0) throw new IOException($"Couldn't write {target}.");
         }
@@ -202,12 +218,12 @@ public static class HairExporter
     /// game skins every vertex to the wrong bone. With every bone in the one partition, the vertices' bone indices
     /// read the same as in the skin, as in hand-made add-ons.
     /// </summary>
-    private static void FillPartitionBones(NifFile nif, int boneCount)
+    private static void FillPartitionBones(NifFile nif, int boneCount, HashSet<uint> skip)
     {
         var header = nif.GetHeader();
         for (uint i = 0; i < header.GetNumBlocks(); i++)
         {
-            if (header.GetBlockTypeStringById(i) != "NiSkinPartition") continue;
+            if (header.GetBlockTypeStringById(i) != "NiSkinPartition" || skip.Contains(i)) continue;
             var block = header.GetBlockById(i);
             var cPtr = (System.Runtime.InteropServices.HandleRef)typeof(NiObject)
                 .GetMethod("getCPtr", System.Reflection.BindingFlags.NonPublic | System.Reflection.BindingFlags.Public | System.Reflection.BindingFlags.Static)!
@@ -227,6 +243,58 @@ public static class HairExporter
             }
             partition.partitions = blocks;
         }
+    }
+
+    private static HashSet<uint> PartitionBlocks(NifFile nif)
+    {
+        var header = nif.GetHeader();
+        var set = new HashSet<uint>();
+        for (uint i = 0; i < header.GetNumBlocks(); i++) if (header.GetBlockTypeStringById(i) == "NiSkinPartition") set.Add(i);
+        return set;
+    }
+
+    /// <summary>
+    /// Adds the hair to copies of a genital add-on's meshes (_0 and _1), so add-on and hair are one slot-52 piece: the
+    /// game shows one slot-52 addon per skin. Each copy gets the hair rebuilt on that weight's variants of the meshes
+    /// it grew on (where they exist). Writes the hair's textures too.
+    /// </summary>
+    /// <param name="genital">The add-on's _1 mesh file; its _0 is beside it.</param>
+    /// <param name="folder">Where the copies go, under meshes and textures.</param>
+    /// <returns>The files written and the _1 copy's path under meshes.</returns>
+    public static (List<string> Written, string MeshPath) AttachToMesh(string output, string folder, string genital, string name, HairMesh mesh,
+        IReadOnlyList<ShapeData> surfaces, HairMeshLayer look, byte[] atlas, int atlasSize)
+    {
+        if (mesh.VertexCount > ushort.MaxValue) throw new InvalidOperationException($"The hair has {mesh.VertexCount:N0} vertices; a game shape holds at most 65,535.");
+        var written = new List<string>();
+        var file = Safe(name);
+        var diffuseRel = Path.Combine("textures", folder, file + ".dds");
+        var normalRel = Path.Combine("textures", folder, file + "_n.dds");
+        WriteDiffuse(Path.Combine(output, diffuseRel), atlas, atlasSize, look);
+        WriteNormal(Path.Combine(output, normalRel), atlas, atlasSize);
+        written.Add(diffuseRel); written.Add(normalRel);
+
+        string Variant(string path, string weight) => Regex.Replace(path, @"_[01](\.nif)$", weight + "$1", RegexOptions.IgnoreCase);
+        var stem = Path.GetFileName(Variant(genital, "_1"));
+        string? meshPath = null;
+        foreach (var weight in new[] { "_0", "_1" })
+        {
+            var source = Variant(genital, weight);
+            if (!File.Exists(source)) source = genital;
+            // the hair on this weight's meshes (falling back to the meshes it grew on where there's no such variant)
+            var variants = surfaces.Select(s =>
+            {
+                var v = Variant(s.NifPath, weight);
+                var shape = File.Exists(v) ? BodyMesh.Load(v).FirstOrDefault(x => x.Name == s.Name) : null;
+                return shape != null && shape.VertexCount == s.VertexCount ? shape.Positions : s.Positions;
+            }).ToList();
+            var positions = HairMeshBuilder.Rebase(mesh, variants);
+            var rel = Path.Combine("meshes", folder, Variant(stem, weight));
+            WriteNif(surfaces.Select(s => (File.Exists(Variant(s.NifPath, weight)) ? Variant(s.NifPath, weight) : s.NifPath, s.Name)).ToList(),
+                mesh, positions, Path.Combine(output, rel), file, diffuseRel, normalRel, source);
+            written.Add(rel);
+            if (weight == "_1") meshPath = Path.Combine(folder, Variant(stem, "_1"));
+        }
+        return (written, meshPath!);
     }
 
     /// <summary>Each vertex's (bone index, weight) pairs, from an SE triangle shape's vertex data.</summary>

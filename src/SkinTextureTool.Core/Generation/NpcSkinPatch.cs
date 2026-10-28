@@ -30,7 +30,7 @@ public static class NpcSkinPatch
     /// <param name="part">The piece's name ("Hair", "Genitals"); records it made before are replaced.</param>
     /// <returns>The plugin written (relative to <paramref name="output"/>) and notes for the user.</returns>
     public static (string Plugin, List<string> Notes) AddPiece(GameSession game, FormKey npcKey, string output, string part,
-        Func<SkyrimMod, INpcGetter, IRaceGetter, ArmorAddon> makeAddon, IEnumerable<FormKey>? keywords = null)
+        Func<SkyrimMod, INpcGetter, IRaceGetter, ArmorAddon> makeAddon, IEnumerable<FormKey>? keywords = null, IEnumerable<string>? replaces = null)
     {
         var notes = new List<string>();
         var npc = game.Cache.Resolve<INpcGetter>(npcKey);
@@ -64,12 +64,16 @@ public static class NpcSkinPatch
 
         // replace this piece: drop the addons (and their texture sets) it made last time
         var prefix = $"BDH_{part}_";
-        foreach (var old in mod.ArmorAddons.Where(a => a.EditorID?.StartsWith(prefix) == true).ToList())
+        foreach (var gone in new[] { part }.Concat(replaces ?? Array.Empty<string>()).Select(p => $"BDH_{p}_"))
         {
-            copy.Armature.RemoveAll(l => l.FormKey == old.FormKey);
-            mod.ArmorAddons.Remove(old.FormKey);
+            foreach (var old in mod.ArmorAddons.Where(a => a.EditorID?.StartsWith(gone) == true).ToList())
+            {
+                copy.Armature.RemoveAll(l => l.FormKey == old.FormKey);
+                mod.ArmorAddons.Remove(old.FormKey);
+                if (gone != prefix) notes.Add($"Removed the {gone[4..^1].ToLowerInvariant()} piece from the patch (one slot-52 piece shows per skin); bake the genitals with the hair attached to have both.");
+            }
+            foreach (var old in mod.TextureSets.Where(t => t.EditorID?.StartsWith(gone) == true).ToList()) mod.TextureSets.Remove(old.FormKey);
         }
-        foreach (var old in mod.TextureSets.Where(t => t.EditorID?.StartsWith(prefix) == true).ToList()) mod.TextureSets.Remove(old.FormKey);
 
         var addon = makeAddon(mod, npc, race);
         addon.EditorID = $"{prefix}{npc.EditorID}AA";
@@ -93,7 +97,8 @@ public static class NpcSkinPatch
     }
 
     /// <summary>Gives the NPC exported hair: an addon with the hair mesh, valid for its race (and the race it borrows armour from).</summary>
-    public static (string Plugin, List<string> Notes) Write(GameSession game, FormKey npcKey, string output, string file, string meshPath) =>
+    /// <param name="replaces">Other pieces it takes the place of (only one slot-52 addon shows per skin).</param>
+    public static (string Plugin, List<string> Notes) Write(GameSession game, FormKey npcKey, string output, string file, string meshPath, IEnumerable<string>? replaces = null) =>
         AddPiece(game, npcKey, output, "Hair", (mod, npc, race) =>
         {
             var addon = mod.ArmorAddons.AddNew();
@@ -104,7 +109,7 @@ public static class NpcSkinPatch
             addon.WorldModel = new GenderedItem<Model?>(new Model { File = meshPath }, new Model { File = meshPath });
             addon.WeightSliderEnabled = new GenderedItem<bool>(true, true);
             return addon;
-        });
+        }, null, replaces);
 
     private static Noggog.Cache<IModMasterStyledGetter, ModKey> Styles(GameSession game)
     {

@@ -51,7 +51,8 @@ public sealed record GenitalAddon(IArmorGetter Armor, IArmorAddonGetter Addon, s
     /// slot 52 of the NPC's skin copy, which also gets TNG_SkinWithPenis so animation frameworks know.
     /// </summary>
     /// <param name="textures">The baked maps' paths under textures: diffuse, normal (_msn), subsurface (_sk), specular (_s).</param>
-    public (string Plugin, List<string> Notes) Write(GameSession game, FormKey npcKey, string output, (string Diffuse, string Normal, string Subsurface, string Specular) textures) =>
+    /// <param name="mesh">The female mesh to use instead of the add-on's (its copy with hair attached), under meshes; null keeps it.</param>
+    public (string Plugin, List<string> Notes) Write(GameSession game, FormKey npcKey, string output, (string Diffuse, string Normal, string Subsurface, string Specular) textures, string? mesh = null) =>
         NpcSkinPatch.AddPiece(game, npcKey, output, "Genitals", (mod, npc, race) =>
         {
             var set = Textures != null ? mod.TextureSets.DuplicateInAsNewRecord(Textures) : mod.TextureSets.AddNew();
@@ -65,6 +66,12 @@ public sealed record GenitalAddon(IArmorGetter Armor, IArmorAddonGetter Addon, s
             var addon = mod.ArmorAddons.DuplicateInAsNewRecord(Addon);
             addon.SkinTexture = new GenderedItem<IFormLinkNullableGetter<ITextureSetGetter>>(
                 Addon.SkinTexture.Male.AsNullable(), set.ToNullableLink<ITextureSetGetter>());
+            if (mesh != null)
+            {
+                // one slot-52 piece: the add-on's mesh with the hair in it
+                if (addon.WorldModel?.Female is { } world) world.File = mesh;
+                if (addon.FirstPersonModel?.Female is { } first) first.File = mesh;
+            }
             return addon;
-        }, new[] { NpcSkinPatch.SkinWithPenis });
+        }, new[] { NpcSkinPatch.SkinWithPenis }, mesh != null ? new[] { "Hair" } : null);
 }
