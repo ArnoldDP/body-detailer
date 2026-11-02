@@ -25,6 +25,15 @@ A Windows tool for Skyrim Special Edition that generates procedural skin texture
 
 Genital blend masks go in the `Genital masks` folder next to the exe; one whose name matches the add-on (for example `TRX.png`) is picked automatically.
 
+### Getting the TRX mask
+
+The mask for TRX comes from m4mk203's TRX .blend, available on [Patreon](https://www.patreon.com/m4mk203/posts/trx-futa-addon-56012453):
+
+1. Download the .blend from that post and open it in Blender.
+2. Switch an area to the **Image Editor** and pick the image **Shlong_Mask10** from the image dropdown.
+3. **Image > Save As**, choose PNG, and save it as `TRX.png` in the `Genital masks` folder next to `SkinTextureTool.exe` (create the folder if it isn't there).
+4. In the Genitals tab, pick the TRX add-on; the mask fills in on its own.
+
 ## Building
 
 ```
